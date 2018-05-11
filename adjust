@@ -73,11 +73,11 @@ def read_desc():
 
 def numval(v,min,max,step=1):
     """shortcut for creating linear setting descriptions"""
-    return {"value":v,"min":min,"max":max, "step":step}
+    return {"value":v,"min":min,"max":max, "step":step, "type": "range"}
 
 Gi=1024*1024*1024
 MAX_MEM=1*Gi
-MAX_CPU=2.0
+MAX_CPU=3.5
 
 def cpuunits(s):
     '''convert a string for CPU resource (with optional unit suffix) into a number'''
