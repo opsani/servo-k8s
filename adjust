@@ -16,7 +16,7 @@ import yaml
 json_enc = json.JSONEncoder(separators=(",",":")).encode
 
 # === constants
-DESC_FILE = "/app.yaml"
+DESC_FILE = "./app.yaml"
 version="0.0"
 MEM_STEP=4096 # minimal useful increment in mem limit/reserve
 CPU_STEP=0.001 # 1 millicore, highest resolution supported by k8s
