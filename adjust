@@ -129,15 +129,13 @@ def raw_query(appname, desc=None):
             settings = comp.setdefault("settings", {})
             r = c.get("resources")
             if r:
-                settings["mem_limit"] = numval(memunits(r.get("limits",{}).get("memory","0")), 0, MAX_MEM, MEM_STEP) # (value,min,max,step)
-                settings["mem_request"] = numval(memunits(r.get("requests",{}).get("memory","0")), 0, MAX_MEM, MEM_STEP)
-                settings["cpu_limit"] = numval(cpuunits(r.get("limits",{}).get("cpu","0")), 0, MAX_CPU, CPU_STEP) # (value,min,max,step)
-                settings["cpu_request"] = numval(cpuunits(r.get("requests",{}).get("cpu","0")), 0, MAX_CPU, CPU_STEP)
+                settings["mem"] = numval(memunits(r.get("limits",{}).get("memory","0")), 0, MAX_MEM, MEM_STEP) # (value,min,max,step)
+                settings["cpu"] = numval(cpuunits(r.get("limits",{}).get("cpu","0")), 0, MAX_CPU, CPU_STEP) # (value,min,max,step)
             settings["replicas"] = numval(replicas, 1, MAX_REPLICAS, 1) # NOTE: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
             # current settings of custom env vars (NB: type conv needed for numeric values!)
             for ev in c.get("env",[]):
                 # skip env vars that match the pre-defined setting names above
-                if ev["name"] in ("mem_limit","mem_request","cpu_limit","cpu_request","replicas"):
+                if ev["name"] in ("mem","cpu","replicas"):
                     continue
                 if ev["name"] in settings: 
                     s = settings[ev["name"]]
@@ -251,7 +249,7 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
     # loop ended, timed out:
     raise DeployError("update of {} failed".format(obj))
 
-rsrc_map={"mem_limit":("limits","memory"),"mem_request":("requests","memory"),"cpu_limit":("limits","cpu"),"cpu_request":("requests","cpu")}
+rsrc_map={"mem":("limits","memory"),"cpu":("limits","cpu")}
 def set_rsrc(cp, sn, sv):
     r1,r2 = rsrc_map[sn]
     cp.setdefault("resources",{}).setdefault(r1,{})[r2] = str(sv)
@@ -292,7 +290,7 @@ def update(appname, data):
             else:
                 cont, sn = a
             cp = patches.setdefault(cont,{})
-            if sn in ("mem_limit","mem_request","cpu_limit","cpu_request"):
+            if sn in ("mem","cpu"):
                 #
                 set_rsrc(cp, sn, sv)
                 continue
