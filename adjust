@@ -17,7 +17,6 @@ json_enc = json.JSONEncoder(separators=(",",":")).encode
 
 # === constants
 DESC_FILE = "./app.yaml"
-version="0.0"
 MEM_STEP=4096 # minimal useful increment in mem limit/reserve
 CPU_STEP=0.001 # 1 millicore, highest resolution supported by k8s
 MAX_REPLICAS=1000 # arbitrary, TBD
@@ -36,11 +35,17 @@ class ConfigError(Exception): # user-provided descriptor not readable
     pass
 
 
+def kubectl(namespace, *args):
+    r = [ 'kubectl' ]
+    if not bool(int(os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '0'))):
+        r.append('--namespace=' + namespace)
+    return r + list(args)
+
 def k_get(namespace, qry):
     '''run kubectl get and return parsed json output'''
 
     # this will raise exception if it fails:
-    r = subprocess.check_output(["kubectl", "--namespace="+namespace, "get", "--output=json", qry])
+    r = subprocess.check_output(kubectl(namespace, 'get', '--output=json', qry))
     r = r.decode('utf-8')
     r = json.loads(r)
     return r
@@ -49,7 +54,7 @@ def k_patch(namespace, typ, obj, patchstr):
     '''run kubectl patch and return parsed json output'''
 
     # this will raise exception if it fails:
-    cmd = ["kubectl", "--namespace="+namespace, "patch", "--output=json", typ, obj, "-p", patchstr]
+    cmd = kubectl(namespace, "patch", "--output=json", typ, obj, "-p", patchstr)
     r = subprocess.check_output(cmd)
     r = r.decode('utf-8')
     r = json.loads(r)
@@ -137,7 +142,7 @@ def raw_query(appname, desc=None):
                 # skip env vars that match the pre-defined setting names above
                 if ev["name"] in ("mem","cpu","replicas"):
                     continue
-                if ev["name"] in settings: 
+                if ev["name"] in settings:
                     s = settings[ev["name"]]
                     if s.get("type", "linear") == "linear":
                         try:
@@ -194,7 +199,7 @@ def test_dep_progress(dep):
             return co["reason"] == "NewReplicaSetAvailable"
     return None # can't tell
 
-    
+
 # FIXME: observed a patch trigger spontaneous reduction in replica count! (happened when update was attempted without replica count changes and 2nd replica was not schedulable according to k8s)
 # NOTE: update of 'observedGeneration' does not mean that the 'deployment' object is done updating; also checking readyReplicas or availableReplicas in status does not help (these numbers may be for OLD replicas, if the new replicas cannot be started at all). We check for a 'Progressing' condition with a specific 'reason' code as an indication that the deployment is fully updated.
 # The 'kubectl rollout status' command relies only on the deployment object - therefore info in it should be sufficient to track progress.
@@ -212,7 +217,7 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
     m = "updating {}".format(obj)
 
     # NOTE: best to implement this with a 'watch', not using an API poll!
-# ?watch=1 & resourceVersion = metadata[resourceVersion], timeoutSeconds=t, 
+# ?watch=1 & resourceVersion = metadata[resourceVersion], timeoutSeconds=t,
 # --raw=''
 #GET /apis/apps/v1/namespaces/{namespace}/deployments
 
@@ -356,8 +361,9 @@ usage="""adjust --version
 adjust --info
 adjust --query appname
 adjust appname <settings.json
+Note: set OPTUNE_USE_DEFAULT_NAMESPACE=1 environment var when embedded into app
 """
-version="1.0"
+version="1.1"
 
 if __name__ == "__main__":
 #    signal.signal(signal.SIGUSR1, cancel)
