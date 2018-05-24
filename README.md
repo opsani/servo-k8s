@@ -13,6 +13,8 @@ For each component of the application, the following settings are automatically 
 replicas, mem, cpu (pending: add support for mem\_limit, mem\_request, cpu\_limit, cpu\_request).
 If a configuration file is present at ./app.yaml, any custom component settings in it are also returned by 'adjust --info' and map to environment variables of the matching container.
 
+To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If including the servo in the application namespace, ensure this label is set on its Deployment object.
+
 Limitations:
 - works only on 'deployment' objects, other types of controllers are not supported.
 - minimal tested k8s server version: 1.8.

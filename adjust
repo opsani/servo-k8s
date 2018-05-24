@@ -17,6 +17,7 @@ json_enc = json.JSONEncoder(separators=(",",":")).encode
 
 # === constants
 DESC_FILE = "./app.yaml"
+EXCLUDE_LABEL = 'optune.ai/exclude'
 MEM_STEP=4096 # minimal useful increment in mem limit/reserve
 CPU_STEP=0.001 # 1 millicore, highest resolution supported by k8s
 MAX_REPLICAS=1000 # arbitrary, TBD
@@ -116,7 +117,19 @@ def raw_query(appname, desc=None):
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
     for dep in d:
+        # extract deployment name
         dname = dep["metadata"]["name"] # better be present; if not, we could use labels.app or spec.selector.matchLabels.app (but that's dependent on the developer having used the 'app' label to tag the deployment's pods).
+
+        # skip if excluded
+        try:
+            if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
+                continue
+        except Exception as e:
+            #TODO add warning to annotations to be returned
+            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)))
+            pass # fall through, ignore unparseable label
+
+        # extract deployment settings
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
