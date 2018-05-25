@@ -92,7 +92,8 @@ def cpuunits(s):
         return (float(s))
 
 # valid mem units: E, P, T, G, M, K, Ei, Pi, Ti, Gi, Mi, Ki
-mumap = {"E":1000**6,  "P":1000**5,  "T":1000**4,  "G":1000**3,  "M":1000**2,  "K":1000,
+# nb: 'm' suffix found after setting 0.7Gi
+mumap = {"E":1000**6,  "P":1000**5,  "T":1000**4,  "G":1000**3,  "M":1000**2,  "K":1000, "m":1000**-1,
          "Ei":1024**6, "Pi":1024**5, "Ti":1024**4, "Gi":1024**3, "Mi":1024**2, "Ki":1024}
 def memunits(s):
     '''convert a string for memory resource (with optional unit suffix) into a number'''
