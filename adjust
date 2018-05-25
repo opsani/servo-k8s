@@ -217,7 +217,7 @@ def test_dep_progress(dep):
     dbg_log('test_dep_progress:')
     """ check if the deployment has reached final successful status """
     for co in dep["status"]["conditions"]:
-        dbg_log('... condition type {}, reason {}, status {}, message {}'.fromat(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
+        dbg_log('... condition type {}, reason {}, status {}, message {}'.format(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
         # TBD: completion may have different final 'reason' statuses, this is the only one known for now, to be researched.
         if co["type"] == "Progressing":
             return co["reason"] == "NewReplicaSetAvailable"
