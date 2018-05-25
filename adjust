@@ -221,6 +221,9 @@ def test_dep_progress(dep):
         # TBD: completion may have different final 'reason' statuses, this is the only one known for now, to be researched.
         if co["type"] == "Progressing":
             return co["reason"] == "NewReplicaSetAvailable"
+        #nb: the above was not showing up consistently on k8s 1.8 but this did:
+        if co["type"] == "Available" and co["reason"] == "MinimumReplicasAvailable":
+            return co.get("status") == "True" # the string "True", not a bool value
     return None # can't tell
 
 
