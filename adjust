@@ -178,6 +178,10 @@ def ydump(fn, data):
     yaml.dump(data, f)
     f.close()
 
+def dbg_log(*args):
+    if os.getenv("TDR_DEBUG_LOG"):
+        print(*args, file=sys.stderr)
+
 def query(appname, desc=None):
     r, _ = raw_query(appname, desc)
     return r
@@ -210,8 +214,10 @@ def test_dep_generation(dep, g):
     return dep["status"]["observedGeneration"] == g
 
 def test_dep_progress(dep):
+    dbg_log('test_dep_progress:')
     """ check if the deployment has reached final successful status """
     for co in dep["status"]["conditions"]:
+        dbg_log('... condition type {}, reason {}, status {}, message {}'.fromat(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
         # TBD: completion may have different final 'reason' statuses, this is the only one known for now, to be researched.
         if co["type"] == "Progressing":
             return co["reason"] == "NewReplicaSetAvailable"
@@ -234,6 +240,8 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
     p = 0.0
     m = "updating {}".format(obj)
 
+    dbg_log('waiting for update: deployment {}, generation {}'.format(obj, patch_gen))
+
     # NOTE: best to implement this with a 'watch', not using an API poll!
 # ?watch=1 & resourceVersion = metadata[resourceVersion], timeoutSeconds=t,
 # --raw=''
@@ -251,6 +259,8 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
     if w.expired:
         raise DeployError("update of {} failed, timed out waiting for k8s object update".format(obj))
 
+    dbg_log('waiting for progress: deployment {}, generation {}'.format(obj, patch_gen))
+
     p = 1.0
 
     m = "waiting for progress from k8s {}".format(obj)
@@ -262,6 +272,8 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
         if not test_dep_progress(r):
             continue
 
+        dbg_log('... checking replica count: spec {}, status {}'.format(r["spec"]["replicas"], r["status"]["availableReplicas"]))
+
         # JIC: this shouldn't wait anymore, if dep. is not 'progressing' anymore
         p = 2.0
         m = "waiting for replicas update {}".format(obj)
@@ -270,7 +282,7 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
             return # all done
 
     # loop ended, timed out:
-    raise DeployError("update of {} failed".format(obj))
+    raise DeployError("update of {} failed: timed out waiting for replicas to come up".format(obj))
 
 rsrc_map={"mem":("limits","memory"),"cpu":("limits","cpu")}
 def set_rsrc(cp, sn, sv):
@@ -300,6 +312,10 @@ def update(appname, data):
 
     patchlst = {}
     # NB: app-wide settings not supported
+
+    # step-down in data if a 'state' key is provided at the top (FIXME: off-spec)
+    if 'state' in data:
+        data = data['state']
 
     for cn,cd in data.get("application",{}).get("components",{}).items():
         settings = cd.get("settings",{})
