@@ -20,11 +20,11 @@ Example `app.yaml` configuration file:
           httpd:
              settings:
                 workers:
-		    type: linear
-		    min: 1
-		    max: 20
-		    step: 1
-		    value: 1
+                  type: linear
+                  min: 1
+                  max: 20
+                  step: 1
+                  value: 1
 
 This adds a new setting `workers` to the pod named `httpd`; note that the container spec in the pod manifest should include `env: [ {name: workers, value : N} ]`. Only env settings that have a `value` key are supported, if the container has settings with `valueFrom`, these should NOT be listed in the configuration file.
 
