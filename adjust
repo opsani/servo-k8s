@@ -276,12 +276,13 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
         if not test_dep_progress(r):
             continue
 
-        dbg_log('... checking replica count: spec {}, status {}'.format(r["spec"]["replicas"], r["status"]["availableReplicas"]))
+        available_replicas = r["status"].get("availableReplicas",0) # use get(), item is not always present!
+        dbg_log('... checking replica count: spec {}, status {}'.format(r["spec"]["replicas"], available_replicas))
 
         # JIC: this shouldn't wait anymore, if dep. is not 'progressing' anymore
         p = 2.0
         m = "waiting for replicas update {}".format(obj)
-        if r["status"]["availableReplicas"] >= r["spec"]["replicas"]:
+        if available_replicas >= r["spec"]["replicas"]:
             # print ("WAITED", time.time()-w.start, file=sys.stderr)
             return # all done
 
