@@ -11,24 +11,28 @@ Each container in the application's pods is considered a separate component. The
 
 For each component of the application, the following settings are automatically available when 'adjust --query' is ran:
 replicas, mem, cpu (pending: add support for mem\_limit, mem\_request, cpu\_limit, cpu\_request).
-If a configuration file is present at ./app.yaml, any custom component settings in it are also returned by 'adjust --query' and map to environment variables of the matching container. The format of the file, if present, is the same as the expected output of 'adjust --query'. Note it should not include the pre-defined settings noted above - if you have environment variables with the same name, they cannot be set by this driver.
+If a configuration file is present at ./config.yaml, any custom component settings in it are also returned by 'adjust --query' and map to environment variables of the matching container.  In this file, if present, the k8s adjust driver configuration is under the _k8s_ top level key, while any environment variable settings are under a secondary key _application_ in the same formate as as the expected output of 'adjust --query'. Note this file should not include the pre-defined settings noted above - if you have environment variables with the same name, they cannot be set by this driver.
 
-Example `app.yaml` configuration file:
+Example `config.yaml` configuration file:
 
-    application:
-       components:
-          httpd:
-             settings:
-                workers:
-                  type: linear
-                  min: 1
-                  max: 20
-                  step: 1
-                  value: 1
+    k8s:
+       whitelist_deployment_names:  [ "httpd" ]
+       application:
+          components:
+             httpd:
+                settings:
+                   workers:
+                      type: linear
+                      min: 1
+                      max: 20
+                      step: 1
+                      value: 1
 
 This adds a new setting `workers` to the pod named `httpd`; note that the container spec in the pod manifest should include `env: [ {name: workers, value : N} ]`. Only env settings that have a `value` key are supported, if the container has settings with `valueFrom`, these should NOT be listed in the configuration file.
 
 To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If including the servo in the application namespace, ensure this label is set on its Deployment object.
+
+To work with _only_ an explicit list of valid deployments within the target namespace, then include in the config.yaml a list of these deployment names under the `whitelist_deployment_names` key, as shown in the example above.  If this list is present in the config file, then only matching deployments will be tuned.
 
 Limitations:
 - works only on 'deployment' objects, other types of controllers are not supported.

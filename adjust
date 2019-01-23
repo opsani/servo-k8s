@@ -16,7 +16,7 @@ import yaml
 json_enc = json.JSONEncoder(separators=(",",":")).encode
 
 # === constants
-DESC_FILE = "./app.yaml"
+DESC_FILE = "./config.yaml"
 EXCLUDE_LABEL = 'optune.ai/exclude'
 Gi=1024*1024*1024
 MEM_STEP=64*1024*1024 # minimal useful increment in mem limit/reserve, bytes
@@ -65,7 +65,7 @@ def k_patch(namespace, typ, obj, patchstr):
     return r
 
 def read_desc():
-    '''load the user-defined application descriptor and all *local* model and env files referenced by it'''
+    '''load the user-defined descriptor, returning a dictionary of the contents under the k8s top-level key, if any'''
 
     try:
         f = open(DESC_FILE)
@@ -78,7 +78,7 @@ def read_desc():
         raise ConfigError("syntax error in {}: {}".format(DESC_FILE,str(e)))
     # everything else: crash
 
-    return d
+    return d.get('k8s', {})
 
 def numval(v,min,max,step=1):
     """shortcut for creating linear setting descriptions"""
@@ -104,13 +104,17 @@ def memunits(s):
 
 def raw_query(appname, desc=None):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc, if not provided).
-    both the input 'desc' and the return value are in the 'settings query response' format. NOTE only cpu/memory settings and replicas are filled in even if not present in desc. Other settings must have a description in 'desc' to be returned.
+    both the input 'desc' and the return value are in the 'settings query response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names' used to limit tunable deployments.  NOTE only cpu/memory settings and replicas are filled in even if not present in desc. Other settings must have a description in 'desc' to be returned.
     '''
     if not desc:
         desc = {"application":{}}
     elif not desc.get("application"):
         desc["application"] = {}
     comps = desc["application"].setdefault("components", {})
+
+    # pop list of valid deployment names, if provided, from desc
+    whitelist_dep_names = desc.pop("whitelist_deployment_names", None)
+
     d = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
     d = d["items"]
@@ -120,7 +124,11 @@ def raw_query(appname, desc=None):
         # extract deployment name
         dname = dep["metadata"]["name"] # better be present; if not, we could use labels.app or spec.selector.matchLabels.app (but that's dependent on the developer having used the 'app' label to tag the deployment's pods).
 
-        # skip if excluded
+        # skip if excluded from list of valid deployment names
+        if whitelist_dep_names is not None and dname not in whitelist_dep_names:
+            continue
+
+        # skip if excluded by label
         try:
             if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
                 continue
@@ -187,6 +195,9 @@ def query(appname, desc=None):
     r, _ = raw_query(appname, desc)
     return r
 
+def nfy(msg):
+    data = { 'progress': 0, 'message': msg }
+    print(json.dumps(data), flush=True)
 
 class waiter(object):
     """an object for use to poll and wait for a condition;
