@@ -43,6 +43,15 @@ def kubectl(namespace, *args):
     r = [ 'kubectl' ]
     if not bool(int(os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '0'))):
         r.append('--namespace=' + namespace)
+
+    # append conditional args as provided by env vars
+    if os.getenv('OPTUNE_K8S_SERVER') is not None:
+        r.append('--server=' + os.getenv('OPTUNE_K8S_SERVER'))
+    if os.getenv('OPTUNE_K8S_TOKEN') is not None:
+        r.append('--token=' + os.getenv('OPTUNE_K8S_TOKEN'))
+    if bool(os.getenv('OPTUNE_K8S_SKIP_TLS_VERIFY', False)):
+        r.append('--insecure-skip-tls-verify=true')
+
     return r + list(args)
 
 def k_get(namespace, qry):
@@ -396,6 +405,8 @@ def update(appname, data):
                 if not os.getenv("TDR_DEBUG_NO_UNDO"):
                     try:
                         subprocess.call(["kubectl", "rollout", "undo", DEPLOYMENT+"/"+n])
+                        # @@FIXME use the kubectl() function so that we pickup any
+                        # appended cmdline args, e.g., namespace, server, token etc.
                     except subprocess.CalledProcessError:
                         # progress msg with warning TODO
                         print("undo for {} failed".format(n), file=sys.stderr)
