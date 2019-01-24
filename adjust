@@ -21,8 +21,8 @@ EXCLUDE_LABEL = 'optune.ai/exclude'
 Gi=1024*1024*1024
 MEM_STEP=64*1024*1024 # minimal useful increment in mem limit/reserve, bytes
 CPU_STEP=0.01 # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
-MAX_MEM=1*Gi # bytes, may be overridden to higher limit
-MAX_CPU=3.5  # cores
+MAX_MEM=4*Gi # bytes, may be overridden to higher limit
+MAX_CPU=4.0  # cores
 #MAX_REPLICAS=1000 # arbitrary, TBD
 
 # the k8s obj to which we make queries/updates:
