@@ -52,6 +52,9 @@ def kubectl(namespace, *args):
     if bool(os.getenv('OPTUNE_K8S_SKIP_TLS_VERIFY', False)):
         r.append('--insecure-skip-tls-verify=true')
 
+
+    print("DEBUG: ns='{}', env='{}', r='{}', args='{}'".format(namespace, os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '???'), r, list(args)))
+
     return r + list(args)
 
 def k_get(namespace, qry):
