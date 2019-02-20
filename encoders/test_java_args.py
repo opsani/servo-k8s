@@ -76,7 +76,8 @@ def test_describe_no_config_provided():
 
 
 def test_describe_wrong_config_type_provided():
-    with pytest.raises(AssertionError, match='Configuration argument for encoder java_args expected to be a dictionary.'):
+    with pytest.raises(AssertionError,
+                       match='Configuration argument for encoder java_args expected to be a dictionary.'):
         describe('settings', ['-XX:MaxHeapSize=1024m'])
 
 
