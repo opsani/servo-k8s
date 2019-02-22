@@ -17,14 +17,35 @@ import yaml
 # DuplicateSettingsException = type('DuplicateSettingsException', (JavaOptsEncoderException,), {})
 
 
-class MaxHeapSizeSetting:
-    name = 'MaxHeapSize'
-    type = 'range'
-    unit = 'gigabytes'
-    can_relax = True
+class Setting:
+    name = None
 
     def __init__(self, config):
         self.check_config(config)
+        if self.name is None:
+            raise Exception('Setting with its handler class name {} must have '
+                            'attribute `name` defined.'.format(self.__class__.__name__))
+
+    def check_config(self, config):
+        pass
+
+    def describe(self, data):
+        raise NotImplementedError()
+
+    def encode_multi(self, values):
+        raise NotImplementedError()
+
+    def decode_multi(self, data):
+        raise NotImplementedError()
+
+
+class RangeSetting(Setting):
+    type = 'range'
+    unit = ''
+    can_relax = True
+
+    def __init__(self, config):
+        super().__init__(config)
         self.min = config.get('min')
         self.max = config.get('max')
         self.step = config.get('step')
@@ -32,10 +53,13 @@ class MaxHeapSizeSetting:
 
     def check_config(self, config):
         if not config:
-            raise Exception('No configuration provided for setting encoder {} in java-opts encoder.'.format(self.name))
-        minv = config.get('min')
-        maxv = config.get('max')
-        step = config.get('step')
+            config = {}
+        default_min = getattr(self, 'min', None)
+        default_max = getattr(self, 'max', None)
+        default_step = getattr(self, 'step', None)
+        minv = config.get('min', default_min)
+        maxv = config.get('max', default_max)
+        step = config.get('step', default_step)
         if minv is None:
             raise Exception('No min value provided for setting {} in java-opts encoder.'.format(self.name))
         if maxv is None:
@@ -58,8 +82,6 @@ class MaxHeapSizeSetting:
             raise Exception('Step for setting must be 0 when min value == max value.')
         # Relaxation of boundaries
         if not self.can_relax:
-            default_min = getattr(self, 'min', None)
-            default_max = getattr(self, 'max', None)
             if default_min is None:
                 raise Exception('Default min value for setting {} must be provided to disallow its relaxation.')
             elif minv < default_min:
@@ -96,12 +118,46 @@ class MaxHeapSizeSetting:
             raise Exception('Value "{}" is violating step requirement in setting {}'.format(value, self.name))
         return value
 
+
+class GigabytesToMegabytesEncoder:
+    @staticmethod
+    def encode(value):
+        return '{}m'.format(int(round(value * 1024)))
+
+    @staticmethod
+    def decode(data):
+        return int(data.rstrip('m')) / 1024
+
+
+class StrToIntEncoder:
+    @staticmethod
+    def encode(value):
+        return str(value)
+
+    @staticmethod
+    def decode(data):
+        return int(data)
+
+
+class FullArgSetting(RangeSetting):
+    value_encoder = None
+    arg = None
+
+    def __init__(self, config):
+        super().__init__(config)
+        if self.arg is None:
+            raise Exception('Argument `arg` must be provided for setting '
+                            'handled by class {}'.format(self.__class__.__name__))
+        if self.value_encoder is None:
+            raise Exception('You must provide value encoder for setting {} '
+                            'handled by class {}'.format(self.name, self.__class__.__name__))
+
     def encode_multi(self, values):
         value = self.validate_values(values)
-        return ['-XX:{}={}m'.format(self.name, int(round(value * 1024)))]
+        return ['-XX:{}={}'.format(self.arg, self.value_encoder.encode(value))]
 
     def validate_data(self, data):
-        found_args = list(filter(lambda arg: arg.startswith('-XX:{}'.format(self.name)), data))
+        found_args = list(filter(lambda arg: arg.startswith('-XX:{}'.format(self.arg)), data))
         if len(found_args) > 1:
             raise Exception('Received duplicate values for setting {} on decode'.format(self.name))
         if not found_args and self.default is None:
@@ -114,20 +170,33 @@ class MaxHeapSizeSetting:
         if args:
             arg = args[0]
             try:
-                return int(arg.split('=')[1].rstrip('m')) / 1024
+                return self.value_encoder.decode(arg.split('=')[1])
             except ValueError as e:
                 raise Exception('Invalid value to decode for setting {}. '
                                 'Error: {}. Arg: {}'.format(self.name, str(e), arg))
         return self.default
 
 
-class GCTimeRatioSetting:
-    pass
+class MaxHeapSizeSetting(FullArgSetting):
+    value_encoder = GigabytesToMegabytesEncoder()
+    name = 'MaxHeapSize'
+    arg = 'MaxHeapSize'
+    unit = 'gigabytes'
+
+
+class GCTimeRatioSetting(FullArgSetting):
+    value_encoder = StrToIntEncoder()
+    name = 'GCTimeRatio'
+    arg = 'GCTimeRatio'
+    min = 9
+    max = 99
+    step = 1
+    can_relax = False
 
 
 supported_settings = {
     'MaxHeapSize': MaxHeapSizeSetting,
-    # 'GCTimeRatio': GCTimeRatioSetting,
+    'GCTimeRatio': GCTimeRatioSetting,
 }
 
 
@@ -186,6 +255,6 @@ if __name__ == '__main__':
     print('Described', desc)
 
     # Encode
-    data_to_encode = {'MaxHeapSize': 13}  # , 'GCTimeRatio': 10}
+    data_to_encode = {'MaxHeapSize': 13, 'GCTimeRatio': 9}  # , 'GCTimeRatio': 10}
     encoded = encode(encoder_section, data_to_encode)
     print('Encoded', encoded)
