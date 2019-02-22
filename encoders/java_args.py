@@ -146,8 +146,7 @@ class FullArgSetting(RangeSetting):
     def __init__(self, config):
         super().__init__(config)
         if self.arg is None:
-            raise Exception('Argument `arg` must be provided for setting '
-                            'handled by class {}'.format(self.__class__.__name__))
+            self.arg = self.name
         if self.value_encoder is None:
             raise Exception('You must provide value encoder for setting {} '
                             'handled by class {}'.format(self.name, self.__class__.__name__))
@@ -180,14 +179,12 @@ class FullArgSetting(RangeSetting):
 class MaxHeapSizeSetting(FullArgSetting):
     value_encoder = GigabytesToMegabytesEncoder()
     name = 'MaxHeapSize'
-    arg = 'MaxHeapSize'
     unit = 'gigabytes'
 
 
 class GCTimeRatioSetting(FullArgSetting):
     value_encoder = StrToIntEncoder()
     name = 'GCTimeRatio'
-    arg = 'GCTimeRatio'
     min = 9
     max = 99
     step = 1
