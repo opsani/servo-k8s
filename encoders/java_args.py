@@ -5,30 +5,17 @@ import yaml
 # Base exception
 JavaOptsEncoderException = type('JavaOptsEncoderException', (BaseException,), {})
 
-# Developr-only exceptions
+# Developr-related exceptions
 SettingEncoderException = type('SettingEncoderException', (JavaOptsEncoderException,), {})
 NoValueEncoderSettingException = type('NoValueEncoderSettingException',
                                       (SettingEncoderException,), {})
 UnsupportedSettingException = type('UnsupportedSettingException', (SettingEncoderException,), {})
 
-# User exceptions
-NoValueToEncodeException = type('NoValueToEncodeException', (SettingEncoderException,), {})
-NoValueToDecodeException = type('NoValueToDecodeException', (SettingEncoderException,), {})
-InvalidValueException = type('InvalidValueException', (SettingEncoderException,), {})
-InvalidTypeException = type('InvalidTypeException', (SettingEncoderException,), {})
-NoLowerBoundException = type('NoLowerBoundException', (SettingEncoderException,), {})
-NoUpperBoundException = type('NoUpperBoundException', (SettingEncoderException,), {})
-NoDefaultLowerBoundException = type('NoDefaultLowerBoundException', (SettingEncoderException,), {})
-NoDefaultUpperBoundException = type('NoDefaultUpperBoundException', (SettingEncoderException,), {})
-NoLowerBoundRelaxationAllowedException = type('NoLowerBoundRelaxationAllowedException', (SettingEncoderException,), {})
-NoUpperBoundRelaxationAllowedException = type('NoUpperBoundRelaxationAllowedException', (SettingEncoderException,), {})
-LowerBoundViolationException = type('LowerBoundViolationException', (SettingEncoderException,), {})
-UpperBoundViolationException = type('UpperBoundViolationException', (SettingEncoderException,), {})
-BoundariesCollisionException = type('BoundariesCollisionException', (SettingEncoderException,), {})
-NoStepException = type('NoStepException', (SettingEncoderException,), {})
-InvalidStepValueException = type('InvalidStepValueException', (SettingEncoderException,), {})
-ValueStepRemainderException = type('ValueStepRemainderException', (SettingEncoderException,), {})
-MultipleSettingsException = type('MultipleSettingsException', (SettingEncoderException,), {})
+# User-related exceptions
+EncoderConfigException = type('EncoderConfigException', (JavaOptsEncoderException,), {})
+EncoderRuntimeException = type('EncoderRuntimeException', (JavaOptsEncoderException,), {})
+SettingConfigException = type('SettingConfigException', (JavaOptsEncoderException,), {})
+SettingRuntimeException = type('SettingRuntimeException', (JavaOptsEncoderException,), {})
 
 
 def q(v):
@@ -38,9 +25,16 @@ def q(v):
 class Setting:
     name = None
     type = None
+    allowed_options = {'default'}
 
     def __init__(self, config):
-        self.check_config(config)
+        if not config:
+            config = {}
+        self.config = config
+        self.check_class_defaults()
+        self.check_config()
+
+    def check_class_defaults(self):
         if self.name is None:
             raise NotImplementedError(
                 'Setting with its handler class name {} must have '
@@ -50,8 +44,15 @@ class Setting:
                 'Setting with its handler class name {} must have '
                 'attribute `type` defined.'.format(self.__class__.__name__))
 
-    def check_config(self, config):
-        pass
+    def check_config(self):
+        if not isinstance(self.config, dict):
+            raise SettingConfigException('Setting {} must have its configuration to be a dictionary or undefined. '
+                                         'It is currently {}.'.format(q(self.name), self.config.__class__.__name__))
+        for option in self.config.keys():
+            if option not in self.allowed_options:
+                raise SettingConfigException('Cannot recognize option {} for setting {}. '
+                                             'Supported setting: {}.'.format(q(option), q(self.name),
+                                                                             ', '.join(self.allowed_options)))
 
     def describe(self):
         raise NotImplementedError()
@@ -64,71 +65,79 @@ class Setting:
 
 
 class RangeSetting(Setting, ABC):
-    min = None
-    max = None
-    step = None
     can_relax = True
     type = 'range'
     unit = ''
 
     def __init__(self, config):
+        self.allowed_options.update({'min', 'max', 'step'})
         super().__init__(config)
         self.min = config.get('min', getattr(self, 'min', None))
         self.max = config.get('max', getattr(self, 'max', None))
         self.step = config.get('step', getattr(self, 'step', None))
         self.default = config.get('default', getattr(self, 'default', None))
 
-    def check_config(self, config):
-        if not config:
-            config = {}
+    def check_config(self):
+        super().check_config()
         default_min = getattr(self, 'min', None)
         default_max = getattr(self, 'max', None)
         default_step = getattr(self, 'step', None)
-        minv = config.get('min', default_min)
-        maxv = config.get('max', default_max)
-        step = config.get('step', default_step)
+        minv = self.config.get('min', default_min)
+        maxv = self.config.get('max', default_max)
+        step = self.config.get('step', default_step)
         if minv is None:
-            raise NoLowerBoundException(
+            raise SettingConfigException(
                 'No min value configured for setting {} in java-opts encoder.'.format(q(self.name)))
         if maxv is None:
-            raise NoUpperBoundException(
+            raise SettingConfigException(
                 'No max value configured for setting {} in java-opts encoder.'.format(q(self.name)))
         if step is None:
-            raise NoStepException('No step value configured for setting {} in java-opts encoder.'.format(q(self.name)))
+            raise SettingConfigException(
+                'No step value configured for setting {} in java-opts encoder.'.format(q(self.name)))
         if not isinstance(minv, (int, float)):
-            raise InvalidTypeException('Min value must be a number in setting {} of java-opts encoder. '
-                                       'Found {}.'.format(q(self.name), q(minv)))
+            raise SettingConfigException('Min value must be a number in setting {} of java-opts encoder. '
+                                         'Found {}.'.format(q(self.name), q(minv)))
         if not isinstance(maxv, (int, float)):
-            raise InvalidTypeException('Max value must be a number in setting {} of java-opts encoder. '
-                                       'Found {}.'.format(q(self.name), q(maxv)))
+            raise SettingConfigException('Max value must be a number in setting {} of java-opts encoder. '
+                                         'Found {}.'.format(q(self.name), q(maxv)))
         if not isinstance(step, (int, float)):
-            raise InvalidTypeException('Step value must be a number in setting {} of java-opts encoder. '
-                                       'Found {}.'.format(q(self.name), q(step)))
+            raise SettingConfigException('Step value must be a number in setting {} of java-opts encoder. '
+                                         'Found {}.'.format(q(self.name), q(step)))
         if minv > maxv:
-            raise BoundariesCollisionException('Lower boundary is higher than upper boundary in setting {} '
-                                               'of java-opts encoder.'.format(q(self.name)))
+            raise SettingConfigException('Lower boundary is higher than upper boundary in setting {} '
+                                         'of java-opts encoder.'.format(q(self.name)))
         if minv != maxv:
             if step < 0:
-                raise InvalidStepValueException('Step for setting {} must be a positive number.'
-                                                ''.format(q(self.name)))
+                raise SettingConfigException('Step for setting {} must be a positive number.'
+                                             ''.format(q(self.name)))
             if step == 0:
-                raise InvalidStepValueException(
+                raise SettingConfigException(
                     'Step for setting {} cannot be zero when min != max.'.format(q(self.name)))
+        if step != 0 and (maxv - minv) % step > 0:
+            raise SettingConfigException(
+                'Step value for setting {} must allow to get from {} to {} in equal steps. Its current value is {}. '
+                'The size of the last step would be {}.'.format(q(self.name), minv, maxv, step, (maxv - minv) % step))
         # Relaxation of boundaries
         if self.can_relax is False:
             if default_min is None:
                 raise NotImplementedError('Default min value for setting {} must be configured '
                                           'to disallow its relaxation.'.format(q(self.name)))
             elif minv < default_min:
-                raise NoLowerBoundRelaxationAllowedException('Min value for setting {} cannot be lower than {}. '
-                                                             'It is {} now.'.format(q(self.name),
-                                                                                    default_min, minv))
+                raise SettingConfigException('Min value for setting {} cannot be lower than {}. '
+                                             'It is {} now.'.format(q(self.name),
+                                                                    default_min, minv))
             if default_max is None:
                 raise NotImplementedError('Default max value for setting {} must be configured '
-                                          'to disallow its relaxation.')
+                                          'to disallow its relaxation.'.format(q(self.name)))
             elif maxv > default_max:
-                raise NoUpperBoundRelaxationAllowedException('Max value for setting {} cannot be lower than {}. '
-                                                             'It is {} now.'.format(q(self.name), default_max, maxv))
+                raise SettingConfigException('Max value for setting {} cannot be lower than {}. '
+                                             'It is {} now.'.format(q(self.name), default_max, maxv))
+            if default_step is None:
+                raise NotImplementedError('Default step value for setting {} must be configured '
+                                          'to disallow its change.'.format(q(self.name)))
+            elif step % default_step > 0:
+                raise SettingConfigException('Step value for setting {} must be multiple of provided default {}. '
+                                             'It is {} now.'.format(q(self.name), default_step, step))
 
     def describe(self):
         descr = {
@@ -144,20 +153,20 @@ class RangeSetting(Setting, ABC):
 
     def validate_value(self, value):
         if value is None:
-            raise NoValueToEncodeException('No value provided for setting {}'.format(self.name))
+            raise SettingRuntimeException('No value provided for setting {}'.format(self.name))
         if not isinstance(value, (float, int)):
-            raise InvalidTypeException('Value in setting {} must be either integer or float. '
-                                       'Found {}.'.format(q(self.name), q(value)))
+            raise SettingRuntimeException('Value in setting {} must be either integer or float. '
+                                          'Found {}.'.format(q(self.name), q(value)))
         if value < self.min:
-            raise LowerBoundViolationException('Value {} is violating lower bound '
-                                               'in setting {}'.format(q(value), q(self.name)))
+            raise SettingRuntimeException('Value {} is violating lower bound '
+                                          'in setting {}'.format(q(value), q(self.name)))
         if value > self.max:
-            raise UpperBoundViolationException('Value {} is violating upper bound '
-                                               'in setting {}'.format(q(value), q(self.name)))
+            raise SettingRuntimeException('Value {} is violating upper bound '
+                                          'in setting {}'.format(q(value), q(self.name)))
         if self.min < self.max and self.step > 0 and (value - self.min) % self.step != 0:
-            raise ValueStepRemainderException('Value {} is violating step requirement '
-                                              'in setting {}. Step is size {}'.format(q(value), q(self.name),
-                                                                                      self.step))
+            raise SettingRuntimeException('Value {} is violating step requirement '
+                                          'in setting {}. Step is size {}'.format(q(value), q(self.name),
+                                                                                  self.step))
         return value
 
 
@@ -208,11 +217,11 @@ class JavaOptionSetting(RangeSetting):
     def validate_data(self, data):
         found_opts = list(filter(lambda arg: arg.startswith('-XX:{}'.format(self.name)), data))
         if len(found_opts) > 1:
-            raise MultipleSettingsException('Received multiple values for setting {}, only one value is allowed '
-                                            'on decode'.format(q(self.name)))
+            raise SettingRuntimeException('Received multiple values for setting {}, only one value is allowed '
+                                          'on decode'.format(q(self.name)))
         if not found_opts and self.default is None:
-            raise NoValueToDecodeException('No value found to decode for setting {} and no '
-                                           'default value was configured.'.format(q(self.name)))
+            raise SettingRuntimeException('No value found to decode for setting {} and no '
+                                          'default value was configured.'.format(q(self.name)))
         return found_opts
 
     def decode_option(self, data):
@@ -228,15 +237,15 @@ class JavaOptionSetting(RangeSetting):
             try:
                 return self.value_encoder.decode(opt.split('=', 1)[1])
             except ValueError as e:
-                raise InvalidValueException('Invalid value to decode for setting {}. '
-                                            'Error: {}. Arg: {}'.format(q(self.name), str(e), opt))
+                raise SettingRuntimeException('Invalid value to decode for setting {}. '
+                                              'Error: {}. Arg: {}'.format(q(self.name), str(e), opt))
         return self.default
 
 
 class MaxHeapSizeSetting(JavaOptionSetting):
     value_encoder = IntGbToStrPrefixMbEncoder()
     name = 'MaxHeapSize'
-    unit = 'gigabytes'
+    unit = 'GiB'
     min = .5
     step = .125
 
@@ -256,8 +265,8 @@ class Encoder:
         if config is None:
             config = {}
         if not isinstance(config, dict):
-            raise JavaOptsEncoderException('Configuration object for java-opts encoder is expected to be '
-                                           'of a dictionary type')
+            raise EncoderConfigException('Configuration object for java-opts encoder is expected to be '
+                                         'of a dictionary type')
         self.config = config
         self.settings = {}
 
@@ -266,7 +275,7 @@ class Encoder:
             try:
                 setting_class = globals()['{}Setting'.format(name)]
             except KeyError:
-                raise UnsupportedSettingException('Setting "{}" is not supported in java-opts encoder.'.format(name))
+                raise EncoderConfigException('Setting "{}" is not supported in java-opts encoder.'.format(name))
             self.settings[name] = setting_class(setting or {})
 
     def describe(self):
@@ -287,7 +296,8 @@ class Encoder:
         ret.extend(self.config.get('after', []))
 
         if values_to_encode:
-            raise Exception('We received settings to encode we do not support {}'.format(list(values_to_encode.keys())))
+            raise EncoderRuntimeException(
+                'We received settings to encode we do not support {}'.format(list(values_to_encode.keys())))
 
         return ret
 
