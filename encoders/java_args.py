@@ -303,8 +303,13 @@ class Encoder:
 
 
 def encode(config, values):
-    # Filter out values we don't need using describe
-    return Encoder(config).encode_multi(values)
+    encoder = Encoder(config)
+    settings = encoder.describe()
+    setting_values_to_encode = {}
+    for setting_name in settings.keys():
+        if setting_name in values:
+            setting_values_to_encode[setting_name] = values[setting_name]
+    return encoder.encode_multi(setting_values_to_encode), settings.keys()
 
 
 def describe(config, data):

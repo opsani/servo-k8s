@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import print_function
 
+import copy
 import sys
 import os
 import errno
@@ -12,6 +13,7 @@ import requests
 import json
 import yaml
 # import signal
+from encoders.java_args import describe, encode
 
 json_enc = json.JSONEncoder(separators=(",",":")).encode
 
@@ -119,6 +121,8 @@ def raw_query(appname, desc=None):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc, if not provided).
     both the input 'desc' and the return value are in the 'settings query response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names' used to limit tunable deployments.  NOTE only cpu/memory settings and replicas are filled in even if not present in desc. Other settings must have a description in 'desc' to be returned.
     '''
+    if isinstance(desc, dict):
+        desc = copy.deepcopy(desc)
     if not desc:
         desc = {"application":{}}
     elif not desc.get("application"):
@@ -191,6 +195,16 @@ def raw_query(appname, desc=None):
                             raise ConfigError("invalid value found in environment {}={}, it was expected to be numeric".format(ev["name"],ev["value"]))
                     else:
                         s["value"] = ev["value"]
+
+            container = c
+            command_settings = describe(comp.get('command', {}).get('encoder', {}), container.get('command') or [])
+            for name, setting in command_settings.items():
+                if name in settings:
+                    raise Exception('Setting "{}" given by java-opts encoder already exists in `settings` section.'
+                                    ''.format(name))
+                settings[name] = setting
+            if 'command' in comp:
+                del comp['command']
 
     return desc, d
 
@@ -351,6 +365,31 @@ def update(appname, data):
         if not settings: continue
         patches = {}
         replicas = None
+        assert cn in d['application']['components'], 'Could not find component {} in config.yaml.'.format(cn)
+        command_config = d['application']['components'][cn].get('command') or {}
+        dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
+
+        if command_config:
+            namespaced_settings = {}
+            for sname, setting in settings.items():
+                sname_split = sname.split('/', 1)
+                if len(sname_split) > 1:
+                    cont = sname_split[0]
+                    setting_name = sname_split[1]
+                else:
+                    cont = dflt_cont
+                    setting_name = sname_split[0]
+                namespaced_settings.setdefault(cont, {})[setting_name] = copy.deepcopy(setting)
+
+            for cont, cont_settings in namespaced_settings.items():
+                cp = patches.setdefault(cont, {})
+                cp['command'], changed_settings = encode(command_config.get('encoder'), cont_settings)
+                for setting in changed_settings:
+                    if cont == dflt_cont:
+                        del settings[setting]
+                    else:
+                        del settings['{}/{}'.format(cont, setting)]
+
         for sn,_sv in settings.items():
             sv = _value(_sv) # compatibility: allow a scalar, but also work with {"value": {anything}}
             # TODO: validate value (min/max or enum range)
@@ -358,7 +397,7 @@ def update(appname, data):
             # ERROR if len(a)>2
             if len(a) == 1:
                 # sn=a[0]
-                cont=raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
+                cont=dflt_cont # chk for KeyError FIXME
             else:
                 cont, sn = a
             cp = patches.setdefault(cont,{})
