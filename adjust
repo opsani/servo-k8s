@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import copy
+import importlib
 import sys
 import os
 import errno
@@ -13,7 +14,6 @@ import requests
 import json
 import yaml
 # import signal
-from encoders.java_args import describe, encode
 
 json_enc = json.JSONEncoder(separators=(",",":")).encode
 
@@ -197,14 +197,25 @@ def raw_query(appname, desc=None):
                         s["value"] = ev["value"]
 
             container = c
-            command_settings = describe(comp.get('command', {}).get('encoder', {}), container.get('command') or [])
-            for name, setting in command_settings.items():
-                if name in settings:
-                    raise Exception('Setting "{}" given by java-opts encoder already exists in `settings` section.'
-                                    ''.format(name))
-                settings[name] = setting
-            if 'command' in comp:
-                del comp['command']
+            command_config = comp.get('command', {})
+            command_encoder = command_config.get('encoder', {})
+            if command_config and command_encoder:
+                encoder_name = command_encoder.get('name')
+                assert encoder_name, 'Command encoder name must be specified. Got "{}"'.format(encoder_name)
+                try:
+                    encoder_base = importlib.import_module('encoders.base')
+                except ImportError:
+                    raise ImportError('Unable to import base for encoders when handling `command` section.')
+                command_settings = encoder_base.describe(encoder_name,
+                                                         comp.get('command', {}).get('encoder', {}),
+                                                         container.get('command') or [])
+                for name, setting in command_settings.items():
+                    if name in settings:
+                        raise Exception('Setting "{}" given by java-opts encoder already exists in `settings` section.'
+                                        ''.format(name))
+                    settings[name] = setting
+                if 'command' in comp:
+                    del comp['command']
 
     return desc, d
 
@@ -367,9 +378,16 @@ def update(appname, data):
         replicas = None
         assert cn in d['application']['components'], 'Could not find component {} in config.yaml.'.format(cn)
         command_config = d['application']['components'][cn].get('command') or {}
+        command_encoder = command_config.get('encoder')
         dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
 
-        if command_config:
+        if command_config and command_encoder:
+            encoder_name = command_encoder.get('name')
+            assert encoder_name, 'Command encoder name must be specified. Got "{}"'.format(encoder_name)
+            try:
+                encoder_base = importlib.import_module('encoders.base')
+            except ImportError:
+                raise ImportError('Unable to import base for encoders when handling `command` section.')
             namespaced_settings = {}
             for sname, setting in settings.items():
                 sname_split = sname.split('/', 1)
@@ -383,7 +401,8 @@ def update(appname, data):
 
             for cont, cont_settings in namespaced_settings.items():
                 cp = patches.setdefault(cont, {})
-                cp['command'], changed_settings = encode(command_config.get('encoder'), cont_settings)
+                cp['command'], changed_settings = encoder_base.encode(encoder_name,
+                                                                      command_config.get('encoder'), cont_settings)
                 for setting in changed_settings:
                     if cont == dflt_cont:
                         del settings[setting]
