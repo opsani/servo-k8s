@@ -41,6 +41,13 @@ class ConfigError(Exception): # user-provided descriptor not readable
     pass
 
 
+def import_encoder_base():
+    try:
+        return importlib.import_module('encoders.base')
+    except ImportError:
+        raise ImportError('Unable to import base for encoders when handling `command` section.')
+
+
 def kubectl(namespace, *args):
     r = [ 'kubectl' ]
     if not bool(int(os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '0'))):
@@ -196,24 +203,19 @@ def raw_query(appname, desc=None):
                     else:
                         s["value"] = ev["value"]
 
-            container = c
             command_config = comp.get('command', {})
-            command_encoder = command_config.get('encoder', {})
-            if command_config and command_encoder:
-                encoder_name = command_encoder.get('name')
-                assert encoder_name, 'Command encoder name must be specified. Got "{}"'.format(encoder_name)
-                try:
-                    encoder_base = importlib.import_module('encoders.base')
-                except ImportError:
-                    raise ImportError('Unable to import base for encoders when handling `command` section.')
-                command_settings = encoder_base.describe(encoder_name,
-                                                         comp.get('command', {}).get('encoder', {}),
-                                                         container.get('command') or [])
-                for name, setting in command_settings.items():
+            command_encoder_config = command_config.get('encoder', {})
+            if command_config and command_encoder_config:
+                encoder_base = import_encoder_base()
+                command_value = c.get('command', [])
+                command_encoder_settings = encoder_base.describe(command_encoder_config, command_value)
+                for name, setting in command_encoder_settings.items():
                     if name in settings:
-                        raise Exception('Setting "{}" given by java-opts encoder already exists in `settings` section.'
-                                        ''.format(name))
+                        raise Exception('Setting "{}" specified for {} encoder in `command` section '
+                                        'already exists in main `settings` section.'
+                                        ''.format(name, command_encoder_config.get('name')))
                     settings[name] = setting
+                # Remove command section from descriptor
                 if 'command' in comp:
                     del comp['command']
 
@@ -377,17 +379,16 @@ def update(appname, data):
         patches = {}
         replicas = None
         assert cn in d['application']['components'], 'Could not find component {} in config.yaml.'.format(cn)
-        command_config = d['application']['components'][cn].get('command') or {}
-        command_encoder = command_config.get('encoder')
         dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
 
-        if command_config and command_encoder:
-            encoder_name = command_encoder.get('name')
-            assert encoder_name, 'Command encoder name must be specified. Got "{}"'.format(encoder_name)
-            try:
-                encoder_base = importlib.import_module('encoders.base')
-            except ImportError:
-                raise ImportError('Unable to import base for encoders when handling `command` section.')
+        # Handle settings encoder in command section
+        command_config = d['application']['components'][cn].get('command') or {}
+        command_encoder_config = command_config.get('encoder')
+        if command_config and command_encoder_config:
+            # Import setting encoder helpers
+            encoder_base = import_encoder_base()
+
+            # Prepare settings to encode
             namespaced_settings = {}
             for sname, setting in settings.items():
                 sname_split = sname.split('/', 1)
@@ -399,11 +400,13 @@ def update(appname, data):
                     setting_name = sname_split[0]
                 namespaced_settings.setdefault(cont, {})[setting_name] = copy.deepcopy(setting)
 
+            # Encode settings
             for cont, cont_settings in namespaced_settings.items():
                 cp = patches.setdefault(cont, {})
-                cp['command'], changed_settings = encoder_base.encode(encoder_name,
-                                                                      command_config.get('encoder'), cont_settings)
-                for setting in changed_settings:
+                cp['command'], encoded_settings = encoder_base.encode(command_encoder_config, cont_settings)
+
+                # Prevent encoded settings from further processing
+                for setting in encoded_settings:
                     if cont == dflt_cont:
                         del settings[setting]
                     else:
