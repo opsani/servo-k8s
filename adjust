@@ -378,11 +378,10 @@ def update(appname, data):
         if not settings: continue
         patches = {}
         replicas = None
-        assert cn in d['application']['components'], 'Could not find component {} in config.yaml.'.format(cn)
         dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
 
         # Handle settings encoder in command section
-        command_config = d['application']['components'][cn].get('command') or {}
+        command_config = d['application']['components'].get(cn, {}).get('command') or {}
         command_encoder_config = command_config.get('encoder')
         if command_config and command_encoder_config:
             # Import setting encoder helpers
