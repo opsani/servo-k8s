@@ -403,7 +403,7 @@ def update(appname, data):
             # Encode settings
             for cont, cont_settings in namespaced_settings.items():
                 cp = patches.setdefault(cont, {})
-                cp['command'], encoded_settings = encoder_base.encode(command_encoder_config, cont_settings)
+                cp['command'], encoded_settings = encoder_base.encode(command_encoder_config, cont_settings, 'list')
 
                 # Prevent encoded settings from further processing
                 for setting in encoded_settings:
