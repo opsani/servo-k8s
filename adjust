@@ -15,6 +15,8 @@ import json
 import yaml
 # import signal
 
+from adjust import Adjust
+
 json_enc = json.JSONEncoder(separators=(",",":")).encode
 
 # === constants
@@ -256,7 +258,7 @@ class waiter(object):
         self.expired = False
 
     def wait(self):
-        time.sleep(self.delay) # TODO: add support for inclreasing delay over time
+        time.sleep(self.delay) # TODO: add support for increasing delay over time
         self.expired = self.end < self.timefn()
         return not self.expired
 
@@ -492,28 +494,11 @@ adjust --query appname
 adjust appname <settings.json
 Note: set OPTUNE_USE_DEFAULT_NAMESPACE=1 environment var when embedded into app
 """
-version="1.1"
+VERSION="1.1"
 
-if __name__ == "__main__":
-#    signal.signal(signal.SIGUSR1, cancel)
-#    signal.signal(signal.SIGTERM, cancel)
-#    signal.signal(signal.SIGINT, cancel)
+class K8sAdjust(Adjust):
 
-    if len(sys.argv)<2:
-        sys.exit(usage)
-
-    if sys.argv[1]=="--version":
-        print(version)
-        sys.exit(0)
-
-    if sys.argv[1]=="--info":
-        print(json.dumps({"version":version, "has_cancel":False}))
-        sys.exit(0)
-
-    if sys.argv[1]=="--query":
-        if len(sys.argv)<3:
-            sys.exit(usage)
-        appname = sys.argv[2]
+    def query(self):
         try:
             d = read_desc()
         except ConfigError as e:
@@ -525,21 +510,30 @@ if __name__ == "__main__":
         except (ApiError,DeployError) as e:
             print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
             sys.exit(3)
-        print(json.dumps(r))
-        sys.exit(0)
+        return r
 
-    # update
-    appname = sys.argv[1]
-    data = json.load(sys.stdin)
-    # data = yaml.load(sys.stdin) # DEBUG
-    try:
-        update(appname,data)
-    except (ApiError,DeployError) as e:
-        print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
-        sys.exit(3)
-    except ConfigError as e:
-        print(json.dumps({"error":"config", "class":"config", "message":str(e)}))
-        sys.exit(3)
-    # all other exceptions: default handler - stack trace and sys.exit(1)
+    def adjust(self, data):
+        try:
+            update(appname,data)
+        except (ApiError,DeployError) as e:
+            print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
+            sys.exit(3)
+        except ConfigError as e:
+            print(json.dumps({"error":"config", "class":"config", "message":str(e)}))
+            sys.exit(3)
+        # all other exceptions: default handler - stack trace and sys.exit(1)
+
+
+if __name__ == "__main__":
+#    signal.signal(signal.SIGUSR1, cancel)
+#    signal.signal(signal.SIGTERM, cancel)
+#    signal.signal(signal.SIGINT, cancel)
+
+    drv = K8sAdjust(VERSION, "K8s driver for OCO servo.\n"
+          "Note: set OPTUNE_USE_DEFAULT_NAMESPACE=1 environment var when embedded into app",
+          supports_cancel=False,
+          progress_interval=None)
+
+    drv.run()
 
 # TBD: no support for multiple apps with different descriptors (desc file /app.yaml is not app-specific)

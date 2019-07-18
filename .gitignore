@@ -1,3 +1,10 @@
+# ignore symlink to (or copy of) adjust.py
+adjust.py
+
+# temporary files
+.*.swp
+*.tmp
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
