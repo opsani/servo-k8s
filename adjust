@@ -158,7 +158,7 @@ def raw_query(appname, desc=None):
                 continue
         except Exception as e:
             #TODO add warning to annotations to be returned
-            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)))
+            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)), file=sys.stderr)
             # pass # fall through, ignore unparseable label
 
         # extract deployment settings
@@ -285,7 +285,7 @@ def test_dep_progress(dep):
 # ? do we need to use --to-revision with the undo command?
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
-def wait_for_update(appname, obj, patch_gen, c=0, t=1):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 5 # time to wait for object update ('observedGeneration')
     wait_for_progress = 40 # time to wait for rollout to complete
@@ -315,14 +315,15 @@ def wait_for_update(appname, obj, patch_gen, c=0, t=1):
 
     dbg_log('waiting for progress: deployment {}, generation {}'.format(obj, patch_gen))
 
-    p = 1.0
+    p = 1.0 # instance progress phase (out of 3)
+    phases = 3.0
 
     m = "waiting for progress from k8s {}".format(obj)
 
     w = waiter(wait_for_progress, 2)
     while w.wait():
         r = k_get(appname, DEPLOYMENT+"/"+obj)
-        print(json_enc({"progress":int((float(c)+p/3.0)*part*100), "message":m})) # TODO: update p from 1 to 3 as time passes
+        print_progress(int((float(c)+p/phases)*part*100), m)
         if not test_dep_progress(r):
             continue
 
@@ -353,9 +354,10 @@ def _value(x):
         return x["value"]
     return x
 
-def update(appname, data):
+def update(appname, data, print_progress):
     d = read_desc()
-    # we'll need the raw k8s api data to see the container names (setting names for a single-container pod will include only the deployment(=pod) name, not the container name)
+    # we'll need the raw k8s api data to see the container names (setting names for a single-container
+    # pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, d)
 
     # convert k8s list of deployments into map
@@ -463,7 +465,7 @@ def update(appname, data):
 
             # wait for update to complete (and print progress)
             try:
-                wait_for_update(appname, n, patch_r["metadata"]["generation"], c, len(patchlst))
+                wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst))
             except DeployError as e:
                 if not os.getenv("TDR_DEBUG_NO_UNDO"):
                     try:
@@ -476,8 +478,7 @@ def update(appname, data):
                 raise
             c = c+1
 
-    # FIXME: doc says return should be empty ({})
-    print(json_enc({"status":"ok"}))
+        # update() return
 
 # cancel not supported
 #def cancel(signum,frame):
@@ -488,6 +489,11 @@ def update(appname, data):
 VERSION = "1.1"
 
 class K8sAdjust(Adjust):
+
+    def _progress(self, progress, message):
+        """adapter for the default base class implementation of progress message"""
+        self.progress = progress
+        self.print_progress(message=message)
 
     def query(self):
         try:
@@ -505,7 +511,7 @@ class K8sAdjust(Adjust):
 
     def adjust(self, data):
         try:
-            update(self.app_id, data)
+            update(self.app_id, data, self._progress)
         except (ApiError, DeployError) as e:
             print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
             sys.exit(3)
