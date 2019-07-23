@@ -235,10 +235,6 @@ def query(appname, desc=None):
     r, _ = raw_query(appname, desc)
     return r
 
-def nfy(msg):
-    data = {'progress': 0, 'message': msg}
-    print(json.dumps(data), flush=True)
-
 class waiter(object):
     """an object for use to poll and wait for a condition;
     use:
