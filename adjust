@@ -125,8 +125,12 @@ def memunits(s):
     return float(s)
 
 def raw_query(appname, desc=None):
-    '''read the list of deployments for appname and fill in data into desc (or create blank desc, if not provided).
-    both the input 'desc' and the return value are in the 'settings query response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names' used to limit tunable deployments.  NOTE only cpu/memory settings and replicas are filled in even if not present in desc. Other settings must have a description in 'desc' to be returned.
+    '''read the list of deployments for appname and fill in data into desc (or create blank desc,
+    if not provided).  both the input 'desc' and the return value are in the 'settings query
+    response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names'
+    used to limit tunable deployments.
+    NOTE only cpu/memory settings and replicas are filled in even if not present in desc.
+    Other settings must have a description in 'desc' to be returned.
     '''
     if isinstance(desc, dict):
         desc = copy.deepcopy(desc)
@@ -156,7 +160,7 @@ def raw_query(appname, desc=None):
         try:
             if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
                 continue
-        except Exception as e:
+        except ValueError as e: # int() is the only thing that should trigger exceptions here
             #TODO add warning to annotations to be returned
             print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)), file=sys.stderr)
             # pass # fall through, ignore unparseable label
@@ -262,17 +266,49 @@ def test_dep_generation(dep, g):
     return dep["status"]["observedGeneration"] == g
 
 def test_dep_progress(dep):
-    """ check if the deployment has reached final successful status """
+    """check if the deployment object 'dep' has reached final successful status
+    ('dep' should be the data returned by 'kubectl get deployment' or the equivalent API call, e.g.,
+    GET /apis/(....)/namespaces/:ns/deployments/my-deployment-name).
+    This tests the conditions[] array and the replica counts and converts the data to a simplified status, as follows:
+    - if the deployment appears to be in progress and k8s is still waiting for updates from the controlled objects (replicasets and their pods),
+      return a tuple (x, ""), where x is the fraction of the updated instances (0.0 .. 1.0, excluding 1.0).
+    - if the deployment has completed, return (1.0, "")
+    - if the deployment has stalled or failed, return (x, "(errormsg)"), with an indication of the
+      detected failure (NOTE: in k8s, the 'stall' is never final and could be unblocked by change
+      of resources or other modifications of the cluster not related to the deployment in question,
+      but we assume that the system is operating under stable conditions and there won't be anyone
+      or anything that can unblock such a stall)
+    """
     dbg_log('test_dep_progress:')
-    for co in dep["status"]["conditions"]:
+    spec_replicas = dep["spec"]["replicas"] # this is what we expect as target
+    error = None
+    progress_final = None
+    dep_status = dep["status"]
+    for co in dep_status["conditions"]:
         dbg_log('... condition type {}, reason {}, status {}, message {}'.format(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
-        # TBD: completion may have different final 'reason' statuses, this is the only one known for now, to be researched.
         if co["type"] == "Progressing":
-            return co["reason"] == "NewReplicaSetAvailable"
-        #nb: the above was not showing up consistently on k8s 1.8 but this did:
-        if co["type"] == "Available" and co["reason"] == "MinimumReplicasAvailable":
-            return co.get("status") == "True" # the string "True", not a bool value
-    return None # can't tell
+            if co["status"] == "True" and co["reason"] == "NewReplicaSetAvailable":
+                # if the replica set was updated, test the replica counts
+                if dep_status.get("updatedReplicas", None) == spec_replicas: # update complete, check other counts
+                    if (dep_status.get("availableReplicas", None) == spec_replicas and
+                        dep_status.get("readyReplicas", None) == spec_replicas):
+                        return (1.0, "") # done
+            elif co["status"] == "False": # failed
+                return (dep_status.get("updatedReplicas", 0)/spec_replicas, co["reason"] + ", " + co.get("message", ""))
+            # otherwise, assume in-progress
+        elif co["type"] == "ReplicaFailure":
+            # note if this status is found, we report failure early here, before k8s times out
+            return (dep_status.get("updatedReplicas", 0)/spec_replicas, co["reason"] + ", " + co.get("message", ""))
+
+    # no errors and not complete yet, assume in-progress
+    # (NOTE if "Progressing" condition isn't found, but updated replicas is good, we will return 100% progress; in this case check that other counts are correct, as well!
+    progress = dep_status.get("updatedReplicas", 0)/spec_replicas
+    if progress == 1.0:
+        if (dep_status.get("availableReplicas", None) == spec_replicas and
+                        dep_status.get("readyReplicas", None) == spec_replicas):
+            return (1.0, "") # all good
+        progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
+    return (progress, "")
 
 
 # FIXME: observed a patch trigger spontaneous reduction in replica count! (happened when update was attempted without replica count changes and 2nd replica was not schedulable according to k8s)
@@ -281,15 +317,15 @@ def test_dep_progress(dep):
 # ? do we need to use --to-revision with the undo command?
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
-def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress = 40):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 5 # time to wait for object update ('observedGeneration')
-    wait_for_progress = 40 # time to wait for rollout to complete
+    # wait_for_progress = 40 # time to wait for rollout to complete
 
     part = 1.0/float(t)
-    p = 0.0
     m = "updating {}".format(obj)
 
+ #FIXME FIXME: configurable timeout
     dbg_log('waiting for update: deployment {}, generation {}'.format(obj, patch_gen))
 
     # NOTE: best to implement this with a 'watch', not using an API poll!
@@ -311,30 +347,24 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
 
     dbg_log('waiting for progress: deployment {}, generation {}'.format(obj, patch_gen))
 
-    p = 1.0 # instance progress phase (out of 3)
-    phases = 3.0
+    p = 0.0 #
 
     m = "waiting for progress from k8s {}".format(obj)
 
     w = waiter(wait_for_progress, 2)
+    c = float(c)
+    err = "(wait skipped)"
     while w.wait():
         r = k_get(appname, DEPLOYMENT+"/"+obj)
-        print_progress(int((float(c)+p/phases)*part*100), m)
-        if not test_dep_progress(r):
-            continue
-
-        available_replicas = r["status"].get("availableReplicas", 0) # use get(), item is not always present!
-        dbg_log('... checking replica count: spec {}, status {}'.format(r["spec"]["replicas"], available_replicas))
-
-        # JIC: this shouldn't wait anymore, if dep. is not 'progressing' anymore
-        p = 2.0
-        m = "waiting for replicas update {}".format(obj)
-        if available_replicas >= r["spec"]["replicas"]:
-            # print ("WAITED", time.time()-w.start, file=sys.stderr)
+        print_progress(int((c+p)*part*100), m)
+        p, err = test_dep_progress(r)
+        if p == 1.0:
             return # all done
+        if err:
+            break
 
     # loop ended, timed out:
-    raise DeployError("update of {} failed: timed out waiting for replicas to come up".format(obj))
+    raise DeployError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err))
 
 rsrc_map = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
 def set_rsrc(cp, sn, sv):
@@ -365,6 +395,8 @@ def update(appname, data, print_progress):
 
     patchlst = {}
     # NB: app-wide settings not supported
+
+    cfg = data.get("control", {})
 
     # step-down in data if a 'state' key is provided at the top (FIXME: off-spec)
     if 'state' in data:
@@ -452,7 +484,8 @@ def update(appname, data, print_progress):
             # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
             patchstr = json_enc(v)
             patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
-            if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and test_dep_progress(patch_r):
+            p, _ = test_dep_progress(patch_r)
+            if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and p == 1.0:
                 # patch made no changes, skip wait_for_update:
                 c = c + 1
                 continue
@@ -460,8 +493,9 @@ def update(appname, data, print_progress):
             # ydump("tst_patch_output_{}.yaml".format(n), patch_r)
 
             # wait for update to complete (and print progress)
+            # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
             try:
-                wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst))
+                wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst), cfg.get("timeout", 630))
             except DeployError as e:
                 if not os.getenv("TDR_DEBUG_NO_UNDO"):
                     try:
