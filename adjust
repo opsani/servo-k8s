@@ -14,7 +14,7 @@ import json
 import yaml
 # import signal
 
-from adjust import Adjust
+from adjust import Adjust, AdjustError
 
 json_enc = json.JSONEncoder(separators=(",", ":")).encode
 
@@ -48,6 +48,53 @@ def import_encoder_base():
     except ImportError:
         raise ImportError('Unable to import base for encoders when handling `command` section.')
 
+# === compute hash of arbitrary data struct
+# (copied inline from skopos/.../plugins/spec_hash_helper.py)
+import hashlib
+
+def _dbg(*data):
+    with open('/skopos/plugins/dbg.log', 'a') as f:
+        print(data, file=f)
+
+def get_hash(data):
+    """md5 hash of Python data. This is limited to scalars that are convertible to string and container
+    structures (list, dict) containing such scalars. Some data items are not distinguishable, if they have
+    the same representation as a string, e.g., hash(b'None') == hash('None') == hash(None)"""
+    # _dbg("get_hash", data)
+    hasher = hashlib.md5()
+    dump_container(data, hasher.update)
+    return hasher.hexdigest()
+
+
+def dump_container(c, func):
+    """stream the contents of a container as a string through a function
+    in a repeatable order, suitable, e.g., for hashing
+    """
+    #
+    if isinstance(c, dict): # dict
+        func("{".encode('utf-8'))
+        for k in sorted(c):# for all repeatable
+            func("{}:".format(k).encode('utf-8'))
+            dump_container(c[k], func)
+            func(",".encode('utf-8'))
+        func("}".encode('utf-8'))
+    elif isinstance(c, list): # list
+        func("[".encode('utf-8'))
+        for k in c:# for all repeatable
+            dump_container(k, func)
+            func(",".encode('utf-8'))
+        func("]".encode('utf-8'))
+    else: # everything else
+        if isinstance(c, type(b'')):
+            pass # already a stream, keep as is
+        elif isinstance(c, str):
+            # encode to stream explicitly here to avoid implicit encoding to ascii
+            c = c.encode('utf-8')
+        else:
+            c = str(c).encode('utf-8')  # convert to string (e.g., if integer)
+        func(c)         # simple value, string or convertible-to-string
+
+# ===
 
 def kubectl(namespace, *args):
     r = ['kubectl']
@@ -71,8 +118,10 @@ def kubectl(namespace, *args):
 def k_get(namespace, qry):
     '''run kubectl get and return parsed json output'''
 
+    if not isinstance(qry, list):
+        qry = [qry]
     # this will raise exception if it fails:
-    r = subprocess.check_output(kubectl(namespace, 'get', '--output=json', qry))
+    r = subprocess.check_output(kubectl(namespace, 'get', '--output=json', *qry))
     r = r.decode('utf-8')
     r = json.loads(r)
     return r
@@ -140,15 +189,52 @@ def raw_query(appname, desc=None):
         desc["application"] = {}
     comps = desc["application"].setdefault("components", {})
 
+    cfg = desc.get("control", {}) # FIXME TODO - query doesn't receive data from remote, only the local cfg can be used; where in the data should the "control" section really be?? note, [userdata][deployment] sub-keys for specifying the 'reference' app means we have to have that 'reference' as a single deployment and it has to be excluded from enumeration as an 'adjustable' component, using the whitelist.
+    refapp = cfg.get("userdata", {}).get("deployment", None)
+    mon_data = {}
+    if refapp:
+        d2 = desc.copy()
+        c2 = copy.deepcopy(cfg)
+        c2["userdata"].pop("deployment", None)
+        d2["control"] = c2
+        d2["whitelist_deployment_names"] = [refapp]
+        d2["application"] = {"components":{}} # empty it, we want only what's found automatically (the ref deployment)
+        try:
+            refqry, _ = raw_query(appname, d2)
+        except (ApiError, AdjustError) as e:
+            raise AdjustError(str(e), status="aborted", reason="ref-app-unavailable")
+        # let other exceptions go unchanged
+
+        # TODO: maybe something better than a sum is needed here, some multi-component scale events could end up modifying scale counts without changing the overall sum
+        replicas_sum = sum((c["settings"]["replicas"]["value"] for c in refqry["application"]["components"].values()))
+        refqry = refqry["monitoring"] # we don't need other data from refqry any more
+        mon_data = {"ref_spec_id": refqry["spec_id"],
+                   "ref_runtime_id": refqry["runtime_id"],
+                   "ref_version_id": refqry["version_id"],
+                   "ref_runtime_count": replicas_sum}
+
     # pop list of valid deployment names, if provided, from desc
     whitelist_dep_names = desc.pop("whitelist_deployment_names", None)
 
     d = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
     d = d["items"]
+    raw_specs = {}
+    imgs = {}
+    runtime_ids = {}
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
     for dep in d:
+        # selector for pods, NOTE this relies on having a equality-based label selector,
+        # k8s seems to support other types, I don't know what's being used in practice.
+        try:
+            sel = dep["spec"]["selector"]["matchLabels"]
+        except KeyError:
+            raise AdjustError("only deployments with matchLabels selector are supported, found selector: {}".format(repr(dep["spec"].get("selector",{}))),
+            status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
+        # convert to string suitable for 'kubect -l labelsel'
+        sel = ','.join(("{}={}".format(k,v) for k,v in sel.items()))
+
         # extract deployment name
         dname = dep["metadata"]["name"] # better be present; if not, we could use labels.app or spec.selector.matchLabels.app (but that's dependent on the developer having used the 'app' label to tag the deployment's pods).
 
@@ -165,11 +251,17 @@ def raw_query(appname, desc=None):
             print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)), file=sys.stderr)
             # pass # fall through, ignore unparseable label
 
+        # list of pods, for runtime_id
+        pods = k_get(appname, ["-l", sel, "pods"])
+        pods = pods["items"]
+        runtime_ids[dname] = [pod["metadata"]["uid"] for pod in pods]
+
         # extract deployment settings
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
         tmplt_spec = dep["spec"]["template"]["spec"]
+        raw_specs[dname] = tmplt_spec # save for later, used to checksum all specs
         for c in tmplt_spec["containers"]:
             # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
             if len(tmplt_spec["containers"]) == 1:
@@ -179,6 +271,7 @@ def raw_query(appname, desc=None):
             # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
             # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
             # TODO: allow min/max/step overrides for mem/cpu settings in the config file
+            imgs[cn] = c["image"] # FIXME, is this always defined?
             comp = comps.setdefault(cn, {})
             settings = comp.setdefault("settings", {})
             r = c.get("resources")
@@ -222,6 +315,19 @@ def raw_query(appname, desc=None):
                 # Remove command section from descriptor
                 if 'command' in comp:
                     del comp['command']
+
+    # app state data
+    # (NOTE we strip the component names because our (single-component) 'reference' app will necessarily have a different component name)
+    # this should be resolved by complete re-work, if we are to support 'reference' app in a way that allows multiple components
+    raw_specs = [raw_specs[k] for k in sorted(raw_specs.keys())]
+    imgs = [imgs[k] for k in sorted(imgs.keys())]
+    mon_data.update({"spec_id": get_hash(raw_specs),
+                  "runtime_id": get_hash(runtime_ids),
+                  "version_id": get_hash(imgs),
+                   # "runtime_count": replicas_sum
+                 })
+
+    desc["monitoring"] = mon_data
 
     return desc, d
 
@@ -397,6 +503,9 @@ def update(appname, data, print_progress):
     # NB: app-wide settings not supported
 
     cfg = data.get("control", {})
+    # TODO: new item: cfg.get("on_fail", "keep") # valid: keep, rollback, destroy
+    # TODO: new item: cfg.get("settlement", 0)
+    # TODO: new item: cfg.get("userdataa", {}).get("deployment", None) # ref app name
 
     # step-down in data if a 'state' key is provided at the top (FIXME: off-spec)
     if 'state' in data:
@@ -499,16 +608,31 @@ def update(appname, data, print_progress):
             except DeployError as e:
                 if not os.getenv("TDR_DEBUG_NO_UNDO"):
                     try:
-                        subprocess.call(["kubectl", "rollout", "undo", DEPLOYMENT+"/"+n])
-                        # @@FIXME use the kubectl() function so that we pickup any
-                        # appended cmdline args, e.g., namespace, server, token etc.
+                        subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                        print("UNDONE", file=sys.stderr)
                     except subprocess.CalledProcessError:
                         # progress msg with warning TODO
                         print("undo for {} failed: {}".format(n, e), file=sys.stderr)
                 raise
             c = c+1
 
-        # update() return
+# spec_id and version_id should be tested without settlement_time, too - TODO
+
+    # post-adjust settlement, if enabled
+    testdata0, raw = raw_query(appname, d)
+    settlement_time = cfg.get("settlement", 0)
+    if not settlement_time:
+        return {"monitoring":testdata0["monitoring"], "status":"ok", "reason":"success"}
+
+# TODO: adjust progress accounting when there is settlement_time!=0
+
+    # wait and watch the app, checking for changes
+    w = waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
+    while w.wait():
+        testdata, raw = raw_query(appname, d)
+        # compare to initial mon data set
+
+    # update() return
 
 # cancel not supported
 #def cancel(signum,frame):
@@ -529,26 +653,23 @@ class K8sAdjust(Adjust):
         try:
             d = read_desc()
         except ConfigError as e:
-            print(json.dumps({"error":"config", "class":"config", "message":str(e)}))
-            sys.exit(3)
+            raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         d.pop("driver", None)
         try:
             r = query(self.app_id, d)
-        except (ApiError, DeployError) as e:
-            print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
-            sys.exit(3)
+        except (ApiError, DeployError) as e: # FIXME: modify err types and set reason properly
+            raise AdjustError(str(e), reason="")
         return r
 
     def adjust(self, data):
         try:
-            update(self.app_id, data, self._progress)
-        except (ApiError, DeployError) as e:
-            print(json.dumps({"error":e.__class__.__name__, "class":"failure", "message":str(e)}))
-            sys.exit(3)
+            r = update(self.app_id, data, self._progress)
+        except (ApiError, DeployError) as e: # FIXME: modify err types and set reason properly
+            raise AdjustError(str(e), reason="")
         except ConfigError as e:
-            print(json.dumps({"error":"config", "class":"config", "message":str(e)}))
-            sys.exit(3)
+            raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         # all other exceptions: default handler - stack trace and sys.exit(1)
+        return r
 
 
 if __name__ == "__main__":
