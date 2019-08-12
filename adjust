@@ -10,6 +10,12 @@ import subprocess
 import time
 
 # import re
+<<<<<<< HEAD
+=======
+from collections import Iterable, OrderedDict
+
+import requests
+>>>>>>> f46d92e... Encoders query
 import json
 import yaml
 # import signal
@@ -124,6 +130,33 @@ def memunits(s):
             return float(s[:-len(u)]) * m
     return float(s)
 
+def check_setting(name, settings):
+    assert isinstance(settings, Iterable), 'Object "settings" passed to check_setting() is not iterable.'
+    assert name not in settings, 'Setting "{}" has been define more than once. ' \
+                                 'Please, check other config sections for setting duplicates.'.format(name)
+
+def encoder_setting_name(name, config):
+    prefix = config['setting_prefix'] if 'setting_prefix' in config else ''
+    return '{}{}'.format(prefix, name)
+
+def describe_encoder(value, config, context):
+    encoder_base = import_encoder_base()
+    try:
+        settings = encoder_base.describe(config, value or '')
+        for name, setting in settings.items():
+            yield (encoder_setting_name(name, config), setting)
+    except BaseException as e:
+        raise Exception('Error while handling {}: {}'.format(context, str(e)))
+
+def israngesetting(s):
+    return s.get('type') == 'range'
+
+def isenumsetting(s):
+    return s.get('type') == 'enum'
+
+def issetting(s):
+    return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
+
 def raw_query(appname, desc=None):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc, if not provided).
     both the input 'desc' and the return value are in the 'settings query response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names' used to limit tunable deployments.  NOTE only cpu/memory settings and replicas are filled in even if not present in desc. Other settings must have a description in 'desc' to be returned.
@@ -189,7 +222,9 @@ def raw_query(appname, desc=None):
             settings["replicas"] = numval(replicas, replicas, replicas, 1)
 
             # current settings of custom env vars (NB: type conv needed for numeric values!)
-            for ev in c.get("env", []):
+            cont_env_list = c.get("env",[])
+            cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
+            for ev in cont_env_list:
                 # skip env vars that match the pre-defined setting names above
                 if ev["name"] in ("mem", "cpu", "replicas"):
                     continue
@@ -203,21 +238,36 @@ def raw_query(appname, desc=None):
                     else:
                         s["value"] = ev["value"]
 
-            command_config = comp.get('command', {})
-            command_encoder_config = command_config.get('encoder', {})
-            if command_config and command_encoder_config:
-                encoder_base = import_encoder_base()
-                command_value = c.get('command', [])
-                command_encoder_settings = encoder_base.describe(command_encoder_config, command_value)
-                for name, setting in command_encoder_settings.items():
-                    if name in settings:
-                        raise Exception('Setting "{}" specified for {} encoder in `command` section '
-                                        'already exists in main `settings` section.'
-                                        ''.format(name, command_encoder_config.get('name')))
-                    settings[name] = setting
-                # Remove command section from descriptor
-                if 'command' in comp:
-                    del comp['command']
+            env = comp.get('env')
+            if env is not None:
+                assert isinstance(env, dict), 'Config section "env" should be a dictionary.'
+                for en, ev in env.items():
+                    check_setting(en, settings)
+                    assert isinstance(ev, dict), 'Setting "{}" in section "env" of a config file is not a dictionary.'
+                    if 'encoder' in ev:
+                        for name, setting in describe_encoder(cont_env_dict.get(en), ev['encoder'],
+                                                              context='an environment variable {}'.format(en)):
+                            check_setting(name, settings)
+                            settings[name] = setting
+                    if issetting(ev):
+                        defval = ev.pop('default', None)
+                        val = cont_env_dict.get(en, defval)
+                        val = float(val) if israngesetting(ev) and isinstance(val, (int, str)) else val
+                        val = {**ev, 'value': val}
+                        settings[en] = val
+                # Remove section "env" from final descriptor
+                del comp['env']
+
+            command = comp.get('command')
+            if command is not None:
+                assert isinstance(command, dict), 'Config section "command" should be a dictionary.'
+                if command.get('encoder'):
+                    for name, setting in describe_encoder(c.get('command', []), command['encoder'],
+                                                          context='a command section'):
+                        check_setting(name, settings)
+                        settings[name] = setting
+                    # Remove section "command" from final descriptor
+                del comp['command']
 
     return desc, d
 
