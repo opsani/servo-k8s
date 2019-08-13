@@ -148,6 +148,20 @@ def describe_encoder(value, config, context):
     except BaseException as e:
         raise Exception('Error while handling {}: {}'.format(context, str(e)))
 
+def encode_encoder(settings, config, context='an encode phase of an encoder'):
+    encoder_base = import_encoder_base()
+    try:
+        sanitized_settings = settings
+        prefix = config.get('setting_prefix')
+        if prefix:
+            sanitized_settings = dict(map(lambda i: (i[0].lstrip(prefix), i[1]),
+                                          filter(lambda i: i[0].startswith(prefix), settings.items())))
+        encoded_value, encoded_settings = encoder_base.encode(config, sanitized_settings)
+        encoded_settings = list(map(lambda setting_name: encoder_setting_name(setting_name, config), encoded_settings))
+        return encoded_value, encoded_settings
+    except BaseException as e:
+        raise Exception('Error while handling {}: {}'.format(context, str(e)))
+
 def israngesetting(s):
     return s.get('type') == 'range'
 
@@ -156,6 +170,12 @@ def isenumsetting(s):
 
 def issetting(s):
     return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
+
+def check_component_section(component, name):
+    sec = component.get(name)
+    if sec is not None:
+        assert isinstance(component, dict), 'Config section "env" should be a dictionary.'
+    return sec
 
 def raw_query(appname, desc=None):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc, if not provided).
@@ -425,50 +445,47 @@ def update(appname, data, print_progress):
         if not settings: continue
         patches = {}
         replicas = None
+        cont = None
+
+        if '/' in cn:
+            cn, cont = cn.split('/', 1)
+
         dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
+        cont = cont or dflt_cont
 
-        # Handle settings encoder in command section
-        command_config = d['application']['components'].get(cn, {}).get('command') or {}
-        command_encoder_config = command_config.get('encoder')
-        if command_config and command_encoder_config:
-            # Import setting encoder helpers
-            encoder_base = import_encoder_base()
+        comp = d['application']['components'].get(cn, {})
 
-            # Prepare settings to encode
-            namespaced_settings = {}
-            for sname, setting in settings.items():
-                sname_split = sname.split('/', 1)
-                if len(sname_split) > 1:
-                    cont = sname_split[0]
-                    setting_name = sname_split[1]
-                else:
-                    cont = dflt_cont
-                    setting_name = sname_split[0]
-                namespaced_settings.setdefault(cont, {})[setting_name] = copy.deepcopy(setting)
-
-            # Encode settings
-            for cont, cont_settings in namespaced_settings.items():
+        command = check_component_section(comp, 'command')
+        if command:
+            if command.get('encoder'):
                 cp = patches.setdefault(cont, {})
-                cp['command'], encoded_settings = encoder_base.encode(command_encoder_config, cont_settings, list)
+                cp['command'], encoded_settings = encode_encoder(settings, command['encoder'])
 
                 # Prevent encoded settings from further processing
                 for setting in encoded_settings:
-                    if cont == dflt_cont:
-                        del settings[setting]
-                    else:
-                        del settings['{}/{}'.format(cont, setting)]
+                    del settings[setting]
 
+        env = check_component_section(comp, 'env')
+        if env:
+            for en, ev in env.items():
+                cp = patches.setdefault(cont, {})
+                if ev.get('encoder'):
+                    val, encoded_settings = encode_encoder(settings, ev['encoder'])
+                    patch_env = cp.setdefault("env", [])
+                    patch_env.append({"name": en,"value": val})
+
+                    # Prevent encoded settings from further processing
+                    for setting in encoded_settings:
+                        del settings[setting]
+                elif issetting(ev):
+                    env = cp.setdefault("env", [])
+                    env.append({"name": en, "value": str(settings[en]['value'])})
+                    del settings[en]
+
+        # Settings and env vars
         for sn, _sv in settings.items():
             sv = _value(_sv) # compatibility: allow a scalar, but also work with {"value": {anything}}
-            # TODO: validate value (min/max or enum range)
-            a = sn.split("/")
-            # ERROR if len(a)>2
-            if len(a) == 1:
-                # sn=a[0]
-                cont = dflt_cont # chk for KeyError FIXME
-            else:
-                cont, sn = a
-            cp = patches.setdefault(cont, {})
+            cp = patches.setdefault(cont,{})
             if sn in ("mem", "cpu"):
                 #
                 set_rsrc(cp, sn, sv)
