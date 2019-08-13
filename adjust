@@ -139,7 +139,7 @@ def encoder_setting_name(name, config):
     prefix = config['setting_prefix'] if 'setting_prefix' in config else ''
     return '{}{}'.format(prefix, name)
 
-def describe_encoder(value, config, context):
+def describe_encoder(value, config, context='a describe phase of an encoder'):
     encoder_base = import_encoder_base()
     try:
         settings = encoder_base.describe(config, value or '')
@@ -230,6 +230,7 @@ def raw_query(appname, desc=None):
             # TODO: allow min/max/step overrides for mem/cpu settings in the config file
             comp = comps.setdefault(cn, {})
             settings = comp.setdefault("settings", {})
+            settings = comp['settings'] = OrderedDict(settings)
             r = c.get("resources")
             if r:
                 settings["mem"] = numval(memunits(r.get("limits", {}).get("memory", "0"))/Gi, MEM_STEP/Gi, MAX_MEM/Gi, MEM_STEP/Gi) # (value,min,max,step) all in GiB
@@ -258,9 +259,8 @@ def raw_query(appname, desc=None):
                     else:
                         s["value"] = ev["value"]
 
-            env = comp.get('env')
-            if env is not None:
-                assert isinstance(env, dict), 'Config section "env" should be a dictionary.'
+            env = check_component_section(comp, 'env')
+            if env:
                 for en, ev in env.items():
                     check_setting(en, settings)
                     assert isinstance(ev, dict), 'Setting "{}" in section "env" of a config file is not a dictionary.'
@@ -278,9 +278,8 @@ def raw_query(appname, desc=None):
                 # Remove section "env" from final descriptor
                 del comp['env']
 
-            command = comp.get('command')
-            if command is not None:
-                assert isinstance(command, dict), 'Config section "command" should be a dictionary.'
+            command = check_component_section(comp, 'command')
+            if command:
                 if command.get('encoder'):
                     for name, setting in describe_encoder(c.get('command', []), command['encoder'],
                                                           context='a command section'):
