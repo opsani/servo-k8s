@@ -10,12 +10,8 @@ import subprocess
 import time
 
 # import re
-<<<<<<< HEAD
-=======
 from collections import Iterable, OrderedDict
 
-import requests
->>>>>>> f46d92e... Encoders query
 import json
 import yaml
 # import signal
