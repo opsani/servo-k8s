@@ -199,13 +199,15 @@ def raw_query(appname, desc=None):
         cname = None
         if '/' in full_comp_name:
             dname, cname = full_comp_name.split('/')
-        assert dname in dd, 'Could not find deployment "{}" defined in component "{}".'.format(dname, full_comp_name)
+        assert dname in dd, 'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
+                            ''.format(dname, full_comp_name, appname)
         dep = dd[dname]
         conts = dep['spec']['template']['spec']['containers']
         contsd = {c['name']: c for c in conts}
         if cname is not None:
             assert cname in contsd, 'Could not find container with name "{}" in deployment "{}" ' \
-                                    'for component "{}".'.format(cname, dname, full_comp_name)
+                                    'for component "{}" in namespace "{}".' \
+                                    ''.format(cname, dname, full_comp_name, appname)
 
         # skip if excluded from list of valid deployment names
         if whitelist_dep_names is not None and dname not in whitelist_dep_names:
