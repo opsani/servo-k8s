@@ -635,57 +635,53 @@ def update(appname, data, print_progress):
                 patch_env = cp.setdefault("env", [])
                 patch_env.append({"name":sn, "value":str(sv)})
 
-        patch = {}
+        patch = patchlst.setdefault(cn, {})
         if patches: # convert to array
-            cp = []
-            patch.update({"spec":{"template":{"spec":{"containers":cp}}}})
+            cp = patch.setdefault('spec', {}).setdefault('template', {}).setdefault('spec', {}).setdefault('containers', [])
             for n, v in patches.items():
                 v["name"] = n
                 cp.append(v)
         if replicas is not None:
             patch.setdefault("spec", {})["replicas"] = replicas
 
-        if patch:
-            patchlst[cn] = patch
+    # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
 
-        # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
+    # NOTE: it seems there's no way to update multiple resources with one 'patch' command (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources get the *same* patch from the cmd line - not what we want)
+    # execute patch commands
+    c = 0
+    for n, v in patchlst.items():
+        # ydump("tst_before_output_{}.yaml".format(n), k_get(appname, DEPLOYMENT + "/" + n))
+        # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
+        patchstr = json_enc(v)
+        try:
+            patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
+        except Exception as e: # TODO: limit to expected errors
+            raise AdjustError(str(e), status="failed", reason="adjust-failed")
+        p, _ = test_dep_progress(patch_r)
+        if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and p == 1.0:
+            # patch made no changes, skip wait_for_update:
+            c = c + 1
+            continue
 
-        # NOTE: it seems there's no way to update multiple resources with one 'patch' command (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources get the *same* patch from the cmd line - not what we want)
-        # execute patch commands
-        c = 0
-        for n, v in patchlst.items():
-            # ydump("tst_before_output_{}.yaml".format(n), k_get(appname, DEPLOYMENT + "/" + n))
-            # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
-            patchstr = json_enc(v)
-            try:
-                patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
-            except Exception as e: # TODO: limit to expected errors
-                raise AdjustError(str(e), status="failed", reason="adjust-failed")
-            p, _ = test_dep_progress(patch_r)
-            if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and p == 1.0:
-                # patch made no changes, skip wait_for_update:
-                c = c + 1
-                continue
+        # ydump("tst_patch_output_{}.yaml".format(n), patch_r)
 
-            # ydump("tst_patch_output_{}.yaml".format(n), patch_r)
-
-            # wait for update to complete (and print progress)
-            # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
-            try:
-                wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst), cfg.get("timeout", 630))
-            except AdjustError as e:
-                if e.reason != "start-failed": # not undo-able
-                    raise
-                onfail = cfg.get("on_fail", "keep") # valid values: keep, destroy, rollback (destroy == scale-to-zero, not supported)
-                if onfail == "rollback":
-                    try:
-                        subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
-                        print("UNDONE", file=sys.stderr)
-                    except subprocess.CalledProcessError:
-                        # progress msg with warning TODO
-                        print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+        # wait for update to complete (and print progress)
+        # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
+        try:
+            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst), cfg.get("timeout", 630))
+        except AdjustError as e:
+            if e.reason != "start-failed": # not undo-able
                 raise
-            c = c+1
+            onfail = cfg.get("on_fail", "keep") # valid values: keep, destroy, rollback (destroy == scale-to-zero, not supported)
+            if onfail == "rollback":
+                try:
+                    subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                    print("UNDONE", file=sys.stderr)
+                except subprocess.CalledProcessError:
+                    # progress msg with warning TODO
+                    print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+            raise
+        c = c+1
 
 # spec_id and version_id should be tested without settlement_time, too - TODO
 
