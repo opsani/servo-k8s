@@ -586,13 +586,14 @@ def update(appname, data, print_progress):
         replicas = None
         cont = None
 
+        full_cn = cn
         if '/' in cn:
             cn, cont = cn.split('/', 1)
 
         dflt_cont = raw[cn]["spec"]["template"]["spec"]["containers"][0]["name"] # chk for KeyError FIXME
         cont = cont or dflt_cont
 
-        comp = d['application']['components'].get(cn, {})
+        comp = d['application']['components'].get(full_cn, {})
 
         command = check_component_section(comp, 'command')
         if command:
