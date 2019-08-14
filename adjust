@@ -265,12 +265,25 @@ def raw_query(appname, desc=None):
     if not d: # NOTE we don't distinguish the case when the namespace doesn't exist at all or is just empty (k8s will return an empty list whether or not it exists)
         raise AdjustError("application '{}' does not exist or has no components".format(appname),
             status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
+    dd = {dep['metadata']['name']: dep for dep in d}
     raw_specs = {}
     imgs = {}
     runtime_ids = {}
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
-    for dep in d:
+    for full_comp_name, _ in comps.items():
+        dname = full_comp_name
+        cname = None
+        if '/' in full_comp_name:
+            dname, cname = full_comp_name.split('/')
+        assert dname in dd, 'Could not find deployment "{}" defined in component "{}".'.format(dname, full_comp_name)
+        dep = dd[dname]
+        conts = dep['spec']['template']['spec']['containers']
+        contsd = {c['name']: c for c in conts}
+        if cname is not None:
+            assert cname in contsd, 'Could not find container with name "{}" in deployment "{}" ' \
+                                    'for component "{}".'.format(cname, dname, full_comp_name)
+
         # selector for pods, NOTE this relies on having a equality-based label selector,
         # k8s seems to support other types, I don't know what's being used in practice.
         try:
@@ -280,9 +293,6 @@ def raw_query(appname, desc=None):
             status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
         # convert to string suitable for 'kubect -l labelsel'
         sel = ','.join(("{}={}".format(k,v) for k,v in sel.items()))
-
-        # extract deployment name
-        dname = dep["metadata"]["name"] # better be present; if not, we could use labels.app or spec.selector.matchLabels.app (but that's dependent on the developer having used the 'app' label to tag the deployment's pods).
 
         # skip if excluded from list of valid deployment names
         if whitelist_dep_names is not None and dname not in whitelist_dep_names:
@@ -306,14 +316,10 @@ def raw_query(appname, desc=None):
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
-        tmplt_spec = dep["spec"]["template"]["spec"]
         raw_specs[dname] = tmplt_spec # save for later, used to checksum all specs
-        for c in tmplt_spec["containers"]:
+        for c in conts:
             # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
-            if len(tmplt_spec["containers"]) == 1:
-                cn = dname
-            else:
-                cn = dname+"/"+c["name"]
+            cn = full_comp_name
             # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
             # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
             # TODO: allow min/max/step overrides for mem/cpu settings in the config file
