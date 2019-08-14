@@ -473,8 +473,8 @@ def update(appname, data, print_progress):
                     for setting in encoded_settings:
                         del settings[setting]
                 elif issetting(ev):
-                    env = cp.setdefault("env", [])
-                    env.append({"name": en, "value": str(settings[en]['value'])})
+                    patch_env = cp.setdefault("env", [])
+                    patch_env.append({"name": en, "value": str(settings[en]['value'])})
                     del settings[en]
 
         # Settings and env vars
@@ -488,8 +488,8 @@ def update(appname, data, print_progress):
             elif sn == "replicas":
                 replicas = int(sv)
             else: # env var setting
-                env = cp.setdefault("env", [])
-                env.append({"name":sn, "value":str(sv)})
+                patch_env = cp.setdefault("env", [])
+                patch_env.append({"name":sn, "value":str(sv)})
 
         patch = {}
         if patches: # convert to array
