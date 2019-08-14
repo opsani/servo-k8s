@@ -491,52 +491,47 @@ def update(appname, data, print_progress):
                 patch_env = cp.setdefault("env", [])
                 patch_env.append({"name":sn, "value":str(sv)})
 
-        patch = {}
+        patch = patchlst.setdefault(cn, {})
         if patches: # convert to array
-            cp = []
-            patch.update({"spec":{"template":{"spec":{"containers":cp}}}})
+            cp = patch.setdefault('spec', {}).setdefault('template', {}).setdefault('spec', {}).setdefault('containers', [])
             for n, v in patches.items():
                 v["name"] = n
                 cp.append(v)
         if replicas is not None:
             patch.setdefault("spec", {})["replicas"] = replicas
 
-        if patch:
-            patchlst[cn] = patch
+    # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
 
-        # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
+    # NOTE: it seems there's no way to update multiple resources with one 'patch' command (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources get the *same* patch from the cmd line - not what we want)
+    # execute patch commands
+    c = 0
+    for n, v in patchlst.items():
+        # ydump("tst_before_output_{}.yaml".format(n), k_get(appname, DEPLOYMENT + "/" + n))
+        # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
+        patchstr = json_enc(v)
+        patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
+        if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and test_dep_progress(patch_r):
+            # patch made no changes, skip wait_for_update:
+            c = c + 1
+            continue
 
-        # NOTE: it seems there's no way to update multiple resources with one 'patch' command (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources get the *same* patch from the cmd line - not what we want)
-        # execute patch commands
-        c = 0
-        for n, v in patchlst.items():
-            # ydump("tst_before_output_{}.yaml".format(n), k_get(appname, DEPLOYMENT + "/" + n))
-            # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
-            patchstr = json_enc(v)
-            patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
-            if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and test_dep_progress(patch_r):
-                # patch made no changes, skip wait_for_update:
-                c = c + 1
-                continue
+        # ydump("tst_patch_output_{}.yaml".format(n), patch_r)
 
-            # ydump("tst_patch_output_{}.yaml".format(n), patch_r)
-
-            # wait for update to complete (and print progress)
-            try:
-                wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst))
-            except DeployError as e:
-                if not os.getenv("TDR_DEBUG_NO_UNDO"):
-                    try:
-                        subprocess.call(["kubectl", "rollout", "undo", DEPLOYMENT+"/"+n])
-                        # @@FIXME use the kubectl() function so that we pickup any
-                        # appended cmdline args, e.g., namespace, server, token etc.
-                    except subprocess.CalledProcessError:
-                        # progress msg with warning TODO
-                        print("undo for {} failed: {}".format(n, e), file=sys.stderr)
-                raise
-            c = c+1
-
-        # update() return
+        # wait for update to complete (and print progress)
+        try:
+            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst))
+        except DeployError as e:
+            if not os.getenv("TDR_DEBUG_NO_UNDO"):
+                try:
+                    subprocess.call(["kubectl", "rollout", "undo", DEPLOYMENT+"/"+n])
+                    # @@FIXME use the kubectl() function so that we pickup any
+                    # appended cmdline args, e.g., namespace, server, token etc.
+                except subprocess.CalledProcessError:
+                    # progress msg with warning TODO
+                    print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+            raise
+        c = c+1
+    # update() return
 
 # cancel not supported
 #def cancel(signum,frame):
