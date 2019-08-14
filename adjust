@@ -187,7 +187,7 @@ def describe_encoder(value, config, context='a describe phase of an encoder'):
     except BaseException as e:
         raise Exception('Error while handling {}: {}'.format(context, str(e)))
 
-def encode_encoder(settings, config, context='an encode phase of an encoder'):
+def encode_encoder(settings, config, expected_type=None, context='an encode phase of an encoder'):
     encoder_base = import_encoder_base()
     try:
         sanitized_settings = settings
@@ -195,7 +195,7 @@ def encode_encoder(settings, config, context='an encode phase of an encoder'):
         if prefix:
             sanitized_settings = dict(map(lambda i: (i[0].lstrip(prefix), i[1]),
                                           filter(lambda i: i[0].startswith(prefix), settings.items())))
-        encoded_value, encoded_settings = encoder_base.encode(config, sanitized_settings)
+        encoded_value, encoded_settings = encoder_base.encode(config, sanitized_settings, expected_type=expected_type)
         encoded_settings = list(map(lambda setting_name: encoder_setting_name(setting_name, config), encoded_settings))
         return encoded_value, encoded_settings
     except BaseException as e:
@@ -598,7 +598,7 @@ def update(appname, data, print_progress):
         if command:
             if command.get('encoder'):
                 cp = patches.setdefault(cont, {})
-                cp['command'], encoded_settings = encode_encoder(settings, command['encoder'])
+                cp['command'], encoded_settings = encode_encoder(settings, command['encoder'], expected_type=list)
 
                 # Prevent encoded settings from further processing
                 for setting in encoded_settings:
@@ -609,7 +609,7 @@ def update(appname, data, print_progress):
             for en, ev in env.items():
                 cp = patches.setdefault(cont, {})
                 if ev.get('encoder'):
-                    val, encoded_settings = encode_encoder(settings, ev['encoder'])
+                    val, encoded_settings = encode_encoder(settings, ev['encoder'], expected_type=str)
                     patch_env = cp.setdefault("env", [])
                     patch_env.append({"name": en,"value": val})
 
