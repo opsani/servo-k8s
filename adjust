@@ -212,18 +212,21 @@ def raw_query(appname, desc=None):
     for full_comp_name, _ in comps.items():
         dep_name = full_comp_name
         cont_name = None
-        if '/' in full_comp_name:
+        if '/' in dep_name:
             dep_name, cont_name = full_comp_name.split('/')
         assert dep_name in deployments_dict, \
             'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
             ''.format(dep_name, full_comp_name, appname)
         dep = deployments_dict[dep_name]
         conts = dep['spec']['template']['spec']['containers']
-        conts_dict = {c['name']: c for c in conts}
         if cont_name is not None:
-            assert cont_name in conts_dict, 'Could not find container with name "{}" in deployment "{}" ' \
-                                            'for component "{}" in namespace "{}".' \
-                                            ''.format(cont_name, dep_name, full_comp_name, appname)
+            conts_dict = {c['name']: c for c in conts}
+            assert cont_name in conts_dict, \
+                'Could not find container with name "{}" in deployment "{}" for component "{}" in namespace "{}".' \
+                ''.format(cont_name, dep_name, full_comp_name, appname)
+            cont = conts_dict[cont_name]
+        else:
+            cont = conts[0]
 
         # skip if excluded by label
         try:
@@ -239,81 +242,81 @@ def raw_query(appname, desc=None):
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep['spec']['replicas']
-        for cont in conts:
-            # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
-            # FIXME: what to do if there's no mem reserve or limits defined?
-            #        (a namespace can have a default mem limit, but that's not necessarily set, either)
-            # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
-            # TODO: allow min/max/step overrides for mem/cpu settings in the config file
-            comp = comps[full_comp_name]
-            settings = comp.setdefault('settings', {})
-            resources = cont.get('resources')
-            if resources:
-                settings['mem'] = numval(v=memunits(resources.get('limits', {}).get('memory', '0')) / Gi,
-                                         minv=MEM_STEP / Gi,
-                                         maxv=MAX_MEM / Gi,
-                                         step=MEM_STEP / Gi)  # (value,min,max,step) all in GiB
-                settings['cpu'] = numval(v=cpuunits(resources.get('limits', {}).get('cpu', '0')),
-                                         minv=CPU_STEP,
-                                         maxv=MAX_CPU,
-                                         step=CPU_STEP)  # (value,min,max,step), all in CPU cores
-                # TODO: adjust min/max to include current values
-                #       (e.g., increase mem_max to at least current if current > max)
 
-            # FIXME: set replicas: can't actually be set for each container (the pod as a whole is replicated);
-            #        for now we have no way of expressing this limitation in the setting descriptions
-            # NOTE: setting min=max=current replicas, since there is no way to know what is allowed;
-            #       use override descriptor to loosen range
-            # settings['replicas'] = numval(v=replicas, minv=1, maxv=MAX_REPLICAS, step=1)
-            settings['replicas'] = numval(v=replicas, minv=replicas, maxv=replicas, step=1)
+        # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
+        # FIXME: what to do if there's no mem reserve or limits defined?
+        #        (a namespace can have a default mem limit, but that's not necessarily set, either)
+        # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
+        # TODO: allow min/max/step overrides for mem/cpu settings in the config file
+        comps[full_comp_name] = comp = comps[full_comp_name] or {}
+        settings = comp.setdefault('settings', {})
+        resources = cont.get('resources')
+        if resources:
+            settings['mem'] = numval(v=memunits(resources.get('limits', {}).get('memory', '0')) / Gi,
+                                     minv=MEM_STEP / Gi,
+                                     maxv=MAX_MEM / Gi,
+                                     step=MEM_STEP / Gi)  # (value,min,max,step) all in GiB
+            settings['cpu'] = numval(v=cpuunits(resources.get('limits', {}).get('cpu', '0')),
+                                     minv=CPU_STEP,
+                                     maxv=MAX_CPU,
+                                     step=CPU_STEP)  # (value,min,max,step), all in CPU cores
+            # TODO: adjust min/max to include current values
+            #       (e.g., increase mem_max to at least current if current > max)
 
-            # current settings of custom env vars (NB: type conv needed for numeric values!)
-            cont_env_list = cont.get('env', [])
-            cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
-            for ev in cont_env_list:
-                # skip env vars that match the pre-defined setting names above
-                if ev['name'] in ('mem', 'cpu', 'replicas'):
-                    continue
-                if ev['name'] in settings:
-                    s = settings[ev['name']]
-                    if s.get('type', 'linear') == 'linear':
-                        try:
-                            s['value'] = float(ev['value'])
-                        except ValueError:
-                            raise ConfigError('invalid value found in environment {}={}, it was expected to be numeric'
-                                              ''.format(ev['name'], ev['value']))
-                    else:
-                        s['value'] = ev['value']
+        # FIXME: set replicas: can't actually be set for each container (the pod as a whole is replicated);
+        #        for now we have no way of expressing this limitation in the setting descriptions
+        # NOTE: setting min=max=current replicas, since there is no way to know what is allowed;
+        #       use override descriptor to loosen range
+        # settings['replicas'] = numval(v=replicas, minv=1, maxv=MAX_REPLICAS, step=1)
+        settings['replicas'] = numval(v=replicas, minv=replicas, maxv=replicas, step=1)
 
-            env = comp.get('env')
-            if env:
-                for en, ev in env.items():
-                    check_setting(en, settings)
-                    assert isinstance(ev, dict), 'Setting "{}" in section "env" of a config file is not a dictionary.'
-                    if 'encoder' in ev:
-                        for name, setting in describe_encoder(cont_env_dict.get(en), ev['encoder'],
-                                                              exception_context='an environment variable {}'
-                                                                                ''.format(en)):
-                            check_setting(name, settings)
-                            settings[name] = setting
-                    if issetting(ev):
-                        defval = ev.pop('default', None)
-                        val = cont_env_dict.get(en, defval)
-                        val = float(val) if israngesetting(ev) and isinstance(val, (int, str)) else val
-                        val = {**ev, 'value': val}
-                        settings[en] = val
-                # Remove section "env" from final descriptor
-                del comp['env']
+        # current settings of custom env vars (NB: type conv needed for numeric values!)
+        cont_env_list = cont.get('env', [])
+        cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
+        for ev in cont_env_list:
+            # skip env vars that match the pre-defined setting names above
+            if ev['name'] in ('mem', 'cpu', 'replicas'):
+                continue
+            if ev['name'] in settings:
+                s = settings[ev['name']]
+                if s.get('type', 'linear') == 'linear':
+                    try:
+                        s['value'] = float(ev['value'])
+                    except ValueError:
+                        raise ConfigError('invalid value found in environment {}={}, it was expected to be numeric'
+                                          ''.format(ev['name'], ev['value']))
+                else:
+                    s['value'] = ev['value']
 
-            command = comp.get('command')
-            if command:
-                if command.get('encoder'):
-                    for name, setting in describe_encoder(cont.get('command', []), command['encoder'],
-                                                          exception_context='a command section'):
+        env = comp.get('env')
+        if env:
+            for en, ev in env.items():
+                check_setting(en, settings)
+                assert isinstance(ev, dict), 'Setting "{}" in section "env" of a config file is not a dictionary.'
+                if 'encoder' in ev:
+                    for name, setting in describe_encoder(cont_env_dict.get(en), ev['encoder'],
+                                                          exception_context='an environment variable {}'
+                                                                            ''.format(en)):
                         check_setting(name, settings)
                         settings[name] = setting
-                    # Remove section "command" from final descriptor
-                del comp['command']
+                if issetting(ev):
+                    defval = ev.pop('default', None)
+                    val = cont_env_dict.get(en, defval)
+                    val = float(val) if israngesetting(ev) and isinstance(val, (int, str)) else val
+                    val = {**ev, 'value': val}
+                    settings[en] = val
+            # Remove section "env" from final descriptor
+            del comp['env']
+
+        command = comp.get('command')
+        if command:
+            if command.get('encoder'):
+                for name, setting in describe_encoder(cont.get('command', []), command['encoder'],
+                                                      exception_context='a command section'):
+                    check_setting(name, settings)
+                    settings[name] = setting
+                # Remove section "command" from final descriptor
+            del comp['command']
 
     return desc, deployments_list
 
@@ -506,7 +509,7 @@ def update(appname, data, print_progress):
         dflt_cont = raw[cn]['spec']['template']['spec']['containers'][0]['name']  # FIXME: chk for KeyError
         cont = cont or dflt_cont
 
-        comp = d['application']['components'].get(full_cn, {})
+        comp = d['application']['components'].get(full_cn) or {}
 
         command = comp.get('command')
         if command:
