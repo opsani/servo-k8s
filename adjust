@@ -10,7 +10,7 @@ import subprocess
 import time
 
 # import re
-from collections import Iterable, OrderedDict
+from collections import Iterable
 
 import json
 import yaml
@@ -23,16 +23,17 @@ json_enc = json.JSONEncoder(separators=(",", ":")).encode
 # === constants
 DESC_FILE = "./config.yaml"
 EXCLUDE_LABEL = 'optune.ai/exclude'
-Gi = 1024*1024*1024
-MEM_STEP = 64*1024*1024 # minimal useful increment in mem limit/reserve, bytes
-CPU_STEP = 0.01 # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
-MAX_MEM = 4*Gi # bytes, may be overridden to higher limit
+Gi = 1024 * 1024 * 1024
+MEM_STEP = 64 * 1024 * 1024  # minimal useful increment in mem limit/reserve, bytes
+CPU_STEP = 0.01  # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
+MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
 MAX_CPU = 4.0  # cores
-#MAX_REPLICAS=1000 # arbitrary, TBD
+# MAX_REPLICAS=1000 # arbitrary, TBD
 
 # the k8s obj to which we make queries/updates:
 DEPLOYMENT = "deployment"
-#DEPLOYMENT="deployment.v1.apps" #new, not supported in 1.8 (it has v1beta1)
+# DEPLOYMENT = "deployment.v1.apps"  # new, not supported in 1.8 (it has v1beta1)
+
 
 class ConfigError(Exception): # user-provided descriptor not readable
     pass
@@ -122,8 +123,9 @@ def k_get(namespace, qry):
     r = json.loads(r)
     return r
 
+
 def k_patch(namespace, typ, obj, patchstr):
-    '''run kubectl patch and return parsed json output'''
+    """run kubectl patch and return parsed json output"""
 
     # this will raise exception if it fails:
     cmd = kubectl(namespace, "patch", "--output=json", typ, obj, "-p", patchstr)
@@ -132,8 +134,9 @@ def k_patch(namespace, typ, obj, patchstr):
     r = json.loads(r)
     return r
 
+
 def read_desc():
-    '''load the user-defined descriptor, returning a dictionary of the contents under the k8s top-level key, if any'''
+    """load the user-defined descriptor, returning a dictionary of the contents under the k8s top-level key, if any"""
 
     try:
         f = open(DESC_FILE)
@@ -141,16 +144,17 @@ def read_desc():
     except IOError as e:
         if e.errno == errno.ENOENT:
             return {} # only if 'file not found'
-        raise ConfigError("cannot read configuration from {}:{}".format(DESC_FILE, e.strerror))
+        raise ConfigError('cannot read configuration from {}:{}'.format(DESC_FILE, e.strerror))
     except yaml.error.YAMLError as e:
-        raise ConfigError("syntax error in {}: {}".format(DESC_FILE, str(e)))
+        raise ConfigError('syntax error in {}: {}'.format(DESC_FILE, str(e)))
+
     # everything else: crash
 
     return d.get('k8s', {})
 
-def numval(v, min, max, step=1):
+def numval(v, minv, maxv, step=1.0):
     """shortcut for creating linear setting descriptions"""
-    return {"value":v, "min":min, "max":max, "step":step, "type": "range"}
+    return {"value":v, "min":minv, "max":maxv, "step":step, "type":"range"}
 
 def cpuunits(s):
     '''convert a string for CPU resource (with optional unit suffix) into a number'''
@@ -162,6 +166,8 @@ def cpuunits(s):
 # nb: 'm' suffix found after setting 0.7Gi
 mumap = {"E":1000**6,  "P":1000**5,  "T":1000**4,  "G":1000**3,  "M":1000**2,  "K":1000, "m":1000**-1,
          "Ei":1024**6, "Pi":1024**5, "Ti":1024**4, "Gi":1024**3, "Mi":1024**2, "Ki":1024}
+
+
 def memunits(s):
     '''convert a string for memory resource (with optional unit suffix) into a number'''
     for u, m in mumap.items():
@@ -174,20 +180,22 @@ def check_setting(name, settings):
     assert name not in settings, 'Setting "{}" has been define more than once. ' \
                                  'Please, check other config sections for setting duplicates.'.format(name)
 
-def encoder_setting_name(name, config):
-    prefix = config['setting_prefix'] if 'setting_prefix' in config else ''
-    return '{}{}'.format(prefix, name)
+def encoder_setting_name(setting_name, encoder_config):
+    prefix = encoder_config['setting_prefix'] if 'setting_prefix' in encoder_config else ''
+    return '{}{}'.format(prefix, setting_name)
 
-def describe_encoder(value, config, context='a describe phase of an encoder'):
+
+def describe_encoder(value, config, exception_context='a describe phase of an encoder'):
     encoder_base = import_encoder_base()
     try:
         settings = encoder_base.describe(config, value or '')
         for name, setting in settings.items():
             yield (encoder_setting_name(name, config), setting)
     except BaseException as e:
-        raise Exception('Error while handling {}: {}'.format(context, str(e)))
+        raise Exception('Error while handling {}: {}'.format(exception_context, str(e)))
 
-def encode_encoder(settings, config, expected_type=None, context='an encode phase of an encoder'):
+
+def encode_encoder(settings, config, expected_type=None, exception_context='an encode phase of an encoder'):
     encoder_base = import_encoder_base()
     try:
         sanitized_settings = settings
@@ -199,7 +207,8 @@ def encode_encoder(settings, config, expected_type=None, context='an encode phas
         encoded_settings = list(map(lambda setting_name: encoder_setting_name(setting_name, config), encoded_settings))
         return encoded_value, encoded_settings
     except BaseException as e:
-        raise Exception('Error while handling {}: {}'.format(context, str(e)))
+        raise Exception('Error while handling {}: {}'.format(exception_context, str(e)))
+
 
 def israngesetting(s):
     return s.get('type') == 'range'
@@ -210,11 +219,6 @@ def isenumsetting(s):
 def issetting(s):
     return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
 
-def check_component_section(component, name):
-    sec = component.get(name)
-    if sec is not None:
-        assert isinstance(component, dict), 'Config section "env" should be a dictionary.'
-    return sec
 
 def raw_query(appname, desc=None):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc,
@@ -228,9 +232,11 @@ def raw_query(appname, desc=None):
         desc = copy.deepcopy(desc)
     if not desc:
         desc = {"application":{}}
-    elif not desc.get("application"):
-        desc["application"] = {}
-    comps = desc["application"].setdefault("components", {})
+
+    app = desc.setdefault("application", {})
+    comps = app.setdefault("components", {})
+
+    dd = {dep['metadata']['name']: dep for dep in deployments_list}
 
     cfg = desc.pop("control", {}) # FIXME TODO - query doesn't receive data from remote, only the local cfg can be used; where in the data should the "control" section really be?? note, [userdata][deployment] sub-keys for specifying the 'reference' app means we have to have that 'reference' as a single deployment and it has to be excluded from enumeration as an 'adjustable' component, using the whitelist.
     refapp = cfg.get("userdata", {}).get("deployment", None)
@@ -240,7 +246,7 @@ def raw_query(appname, desc=None):
         c2 = copy.deepcopy(cfg)
         c2["userdata"].pop("deployment", None)
         d2["control"] = c2
-        d2["whitelist_deployment_names"] = [refapp]
+        # d2["whitelist_deployment_names"] = [refapp] # FIXME FIXME: line below should be re-done, modify 'components' to point to refapp
         d2["application"] = {"components":{}} # empty it, we want only what's found automatically (the ref deployment)
         try:
             refqry, _ = raw_query(appname, d2)
@@ -256,16 +262,13 @@ def raw_query(appname, desc=None):
                    "ref_version_id": refqry["version_id"],
                    "ref_runtime_count": replicas_sum}
 
-    # pop list of valid deployment names, if provided, from desc
-    whitelist_dep_names = desc.pop("whitelist_deployment_names", None)
-
-    d = k_get(appname, DEPLOYMENT)
+    deployments = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
-    d = d["items"]
-    if not d: # NOTE we don't distinguish the case when the namespace doesn't exist at all or is just empty (k8s will return an empty list whether or not it exists)
+    deployments_list = deployments["items"]
+    if not deployments_list: # NOTE we don't distinguish the case when the namespace doesn't exist at all or is just empty (k8s will return an empty list whether or not it exists)
         raise AdjustError("application '{}' does not exist or has no components".format(appname),
             status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
-    dd = {dep['metadata']['name']: dep for dep in d}
+    dd = {dep['metadata']['name']: dep for dep in deployments_list}
     raw_specs = {}
     imgs = {}
     runtime_ids = {}
@@ -296,10 +299,6 @@ def raw_query(appname, desc=None):
         # convert to string suitable for 'kubect -l labelsel'
         sel = ','.join(("{}={}".format(k,v) for k,v in sel.items()))
 
-        # skip if excluded from list of valid deployment names
-        if whitelist_dep_names is not None and dname not in whitelist_dep_names:
-            continue
-
         # skip if excluded by label
         try:
             if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
@@ -319,17 +318,15 @@ def raw_query(appname, desc=None):
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
         raw_specs[dname] = tmplt_spec # save for later, used to checksum all specs
-        for c in conts:
+        for cont in conts:
             # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
-            cn = full_comp_name
             # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
             # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
             # TODO: allow min/max/step overrides for mem/cpu settings in the config file
-            imgs[cn] = c["image"] # FIXME, is this always defined?
-            comp = comps.setdefault(cn, {})
+            imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
+            comp = comps[full_comp_name]
             settings = comp.setdefault("settings", {})
-            settings = comp['settings'] = OrderedDict(settings)
-            r = c.get("resources")
+            r = cont.get("resources")
             if r:
                 settings["mem"] = numval(memunits(r.get("limits", {}).get("memory", "0"))/Gi, MEM_STEP/Gi, MAX_MEM/Gi, MEM_STEP/Gi) # (value,min,max,step) all in GiB
                 settings["cpu"] = numval(cpuunits(r.get("limits", {}).get("cpu", "0")), CPU_STEP, MAX_CPU, CPU_STEP) # (value,min,max,step), all in CPU cores
@@ -339,9 +336,8 @@ def raw_query(appname, desc=None):
             # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
             #settings["replicas"] = numval(replicas, 1, MAX_REPLICAS, 1)
             settings["replicas"] = numval(replicas, replicas, replicas, 1)
-
             # current settings of custom env vars (NB: type conv needed for numeric values!)
-            cont_env_list = c.get("env",[])
+            cont_env_list = cont.get("env",[])
             cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
             for ev in cont_env_list:
                 # skip env vars that match the pre-defined setting names above
@@ -354,18 +350,20 @@ def raw_query(appname, desc=None):
                         try:
                             s["value"] = float(ev["value"])
                         except ValueError:
-                            raise ConfigError("invalid value found in environment {}={}, it was expected to be numeric".format(ev["name"], ev["value"]))
+                            raise ConfigError('invalid value found in environment {}={}, it was expected to be numeric'
+                                              ''.format(ev['name'], ev['value']))
                     else:
                         s["value"] = ev["value"]
 
-            env = check_component_section(comp, 'env')
+            env = comp.get('env')
             if env:
                 for en, ev in env.items():
                     check_setting(en, settings)
                     assert isinstance(ev, dict), 'Setting "{}" in section "env" of a config file is not a dictionary.'
                     if 'encoder' in ev:
                         for name, setting in describe_encoder(cont_env_dict.get(en), ev['encoder'],
-                                                              context='an environment variable {}'.format(en)):
+                                                              exception_context='an environment variable {}'
+                                                                                ''.format(en)):
                             check_setting(name, settings)
                             settings[name] = setting
                     if issetting(ev):
@@ -377,11 +375,11 @@ def raw_query(appname, desc=None):
                 # Remove section "env" from final descriptor
                 del comp['env']
 
-            command = check_component_section(comp, 'command')
+            command = comp.get('command')
             if command:
                 if command.get('encoder'):
-                    for name, setting in describe_encoder(c.get('command', []), command['encoder'],
-                                                          context='a command section'):
+                    for name, setting in describe_encoder(cont.get('command', []), command['encoder'],
+                                                          exception_context='a command section'):
                         check_setting(name, settings)
                         settings[name] = setting
                     # Remove section "command" from final descriptor
@@ -405,7 +403,7 @@ def raw_query(appname, desc=None):
 
     desc["monitoring"] = mon_data
 
-    return desc, d
+    return desc, deployments_list
 
 # DEBUG:
 def ydump(fn, data):
@@ -413,32 +411,36 @@ def ydump(fn, data):
     yaml.dump(data, f)
     f.close()
 
+
 def dbg_log(*args):
     if os.getenv("TDR_DEBUG_LOG"):
         print(*args, file=sys.stderr)
+
 
 def query(appname, desc=None):
     r, _ = raw_query(appname, desc)
     return r
 
-class waiter(object):
+
+class Waiter(object):
     """an object for use to poll and wait for a condition;
     use:
-        w = waiter(max_time, delay)
+        w = Waiter(max_time, delay)
         while w.wait():
             if test_condition(): break
         if w.expired:
             raise Hell
     """
+
     def __init__(self, timeout, delay=1):
-        self.timefn = time.time # change that on windows to time.clock
+        self.timefn = time.time  # change that on windows to time.clock
         self.start = self.timefn()
-        self.end = self.start+timeout
+        self.end = self.start + timeout
         self.delay = delay
         self.expired = False
 
     def wait(self):
-        time.sleep(self.delay) # TODO: add support for increasing delay over time
+        time.sleep(self.delay)  # TODO: add support for increasing delay over time
         self.expired = self.end < self.timefn()
         return not self.expired
 
@@ -511,11 +513,12 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     dbg_log('waiting for update: deployment {}, generation {}'.format(obj, patch_gen))
 
     # NOTE: best to implement this with a 'watch', not using an API poll!
-# ?watch=1 & resourceVersion = metadata[resourceVersion], timeoutSeconds=t,
-# --raw=''
-#GET /apis/apps/v1/namespaces/{namespace}/deployments
 
-    w = waiter(wait_for_gen, 2)
+    # ?watch=1 & resourceVersion = metadata[resourceVersion], timeoutSeconds=t,
+    # --raw=''
+    # GET /apis/apps/v1/namespaces/{namespace}/deployments
+
+    w = Waiter(wait_for_gen, 2)
     while w.wait():
         # no progress prints here, this wait should be short
         r = k_get(appname, DEPLOYMENT+"/"+obj)
@@ -533,7 +536,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
 
     m = "waiting for progress from k8s {}".format(obj)
 
-    w = waiter(wait_for_progress, 2)
+    w = Waiter(wait_for_progress, 2)
     c = float(c)
     err = "(wait skipped)"
     while w.wait():
@@ -548,7 +551,9 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     # loop ended, timed out:
     raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
 
+
 rsrc_map = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
+
 def set_rsrc(cp, sn, sv):
     r1, r2 = rsrc_map[sn]
     if sn == "mem":
@@ -557,15 +562,17 @@ def set_rsrc(cp, sn, sv):
         sv = str(sv)
     cp.setdefault("resources", {}).setdefault(r1, {})[r2] = sv
 
+
 def _value(x):
     if isinstance(x, dict) and "value" in x:
         return x["value"]
     return x
 
+
 def update(appname, data, print_progress):
     d = read_desc()
-    # we'll need the raw k8s api data to see the container names (setting names for a single-container
-    # pod will include only the deployment(=pod) name, not the container name)
+    # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
+    #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, d)
 
     # convert k8s list of deployments into map
@@ -576,7 +583,7 @@ def update(appname, data, print_progress):
     raw = r2
 
     patchlst = {}
-    # NB: app-wide settings not supported
+    # FIXME: NB: app-wide settings not supported
 
     cfg = data.get("control", {})
     # TODO: new item: cfg.get("on_fail", "keep") # valid: keep, rollback, destroy
@@ -589,7 +596,8 @@ def update(appname, data, print_progress):
 
     for cn, cd in data.get("application", {}).get("components", {}).items():
         settings = cd.get("settings", {})
-        if not settings: continue
+        if not settings:
+            continue
         patches = {}
         replicas = None
         cont = None
@@ -603,7 +611,7 @@ def update(appname, data, print_progress):
 
         comp = d['application']['components'].get(full_cn, {})
 
-        command = check_component_section(comp, 'command')
+        command = comp.get('command')
         if command:
             if command.get('encoder'):
                 cp = patches.setdefault(cont, {})
@@ -613,14 +621,14 @@ def update(appname, data, print_progress):
                 for setting in encoded_settings:
                     del settings[setting]
 
-        env = check_component_section(comp, 'env')
+        env = comp.get('env')
         if env:
             for en, ev in env.items():
                 cp = patches.setdefault(cont, {})
                 if ev.get('encoder'):
                     val, encoded_settings = encode_encoder(settings, ev['encoder'], expected_type=str)
                     patch_env = cp.setdefault("env", [])
-                    patch_env.append({"name": en,"value": val})
+                    patch_env.append({"name": en, "value": val})
 
                     # Prevent encoded settings from further processing
                     for setting in encoded_settings:
@@ -635,18 +643,21 @@ def update(appname, data, print_progress):
             sv = _value(_sv) # compatibility: allow a scalar, but also work with {"value": {anything}}
             cp = patches.setdefault(cont,{})
             if sn in ("mem", "cpu"):
-                #
                 set_rsrc(cp, sn, sv)
                 continue
             elif sn == "replicas":
                 replicas = int(sv)
             else: # env var setting
                 patch_env = cp.setdefault("env", [])
-                patch_env.append({"name":sn, "value":str(sv)})
+                patch_env.append({"name": sn, "value": str(sv)})
 
         patch = patchlst.setdefault(cn, {})
-        if patches: # convert to array
-            cp = patch.setdefault('spec', {}).setdefault('template', {}).setdefault('spec', {}).setdefault('containers', [])
+        if patches:  # convert to array
+            cp = patch \
+                .setdefault('spec', {}) \
+                .setdefault('template', {}) \
+                .setdefault('spec', {}) \
+                .setdefault('containers', [])
             for n, v in patches.items():
                 v["name"] = n
                 cp.append(v)
@@ -655,7 +666,10 @@ def update(appname, data, print_progress):
 
     # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
 
-    # NOTE: it seems there's no way to update multiple resources with one 'patch' command (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources get the *same* patch from the cmd line - not what we want)
+    # NOTE: it seems there's no way to update multiple resources with one 'patch' command
+    #       (though -f accepts a directory, not sure how -f=dir works; maybe all listed resources
+    #        get the *same* patch from the cmd line - not what we want)
+
     # execute patch commands
     c = 0
     for n, v in patchlst.items():
@@ -710,7 +724,7 @@ def update(appname, data, print_progress):
 # TODO: adjust progress accounting when there is settlement_time!=0
 
     # wait and watch the app, checking for changes
-    w = waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
+    w = Waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
     while w.wait():
         testdata, raw = raw_query(appname, d)
         mon = testdata["monitoring"]
@@ -730,13 +744,16 @@ def update(appname, data, print_progress):
 
     # update() return
 
-# cancel not supported
-#def cancel(signum,frame):
-#    if not wait_in_progress:
-#        sys_exit(1)
-#    print ("aborting operation...",file=sys.stderr)
 
-VERSION = "1.1"
+# cancel not supported
+# def cancel(signum, frame):
+#     if not wait_in_progress:
+#         sys_exit(1)
+#     print("aborting operation...", file=sys.stderr)
+
+
+VERSION = '1.2'
+
 
 class K8sAdjust(Adjust):
 
@@ -764,9 +781,9 @@ class K8sAdjust(Adjust):
 
 
 if __name__ == "__main__":
-#    signal.signal(signal.SIGUSR1, cancel)
-#    signal.signal(signal.SIGTERM, cancel)
-#    signal.signal(signal.SIGINT, cancel)
+    # signal.signal(signal.SIGUSR1, cancel)
+    # signal.signal(signal.SIGTERM, cancel)
+    # signal.signal(signal.SIGINT, cancel)
 
     K8sAdjust(
         VERSION,
@@ -775,4 +792,4 @@ if __name__ == "__main__":
         supports_cancel=False,
         progress_interval=None).run()
 
-# TBD: no support for multiple apps with different descriptors (desc file /app.yaml is not app-specific)
+# TODO: TBD: no support for multiple apps with different descriptors (desc file /app.yaml is not app-specific)
