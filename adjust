@@ -374,6 +374,11 @@ def raw_query(appname, desc=None):
                     defval = ev.pop('default', None)
                     val = cont_env_dict.get(en, defval)
                     val = float(val) if israngesetting(ev) and isinstance(val, (int, str)) else val
+                    assert val is not None, 'Environment variable "{}" does not have a current value defined and ' \
+                                            'neither it has a default value specified in a config file. ' \
+                                            'Please, set current value for this variable or adjust the ' \
+                                            'configuration file to include its default value.' \
+                                            ''.format(en)
                     val = {**ev, 'value': val}
                     settings[en] = val
             # Remove section "env" from final descriptor
@@ -667,6 +672,8 @@ def update(appname, data, print_progress):
                 cp.append(v)
         if replicas is not None:
             patch.setdefault("spec", {})["replicas"] = replicas
+    else:
+        raise Exception('No components were defiend in a configuration file. Cannot proceed with an adjustment.')
 
     # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
 
