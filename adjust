@@ -28,7 +28,7 @@ MEM_STEP = 64 * 1024 * 1024  # minimal useful increment in mem limit/reserve, by
 CPU_STEP = 0.01  # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
 MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
 MAX_CPU = 4.0  # cores
-# MAX_REPLICAS=1000 # arbitrary, TBD
+# MAX_REPLICAS = 1000 # arbitrary, TBD
 
 # the k8s obj to which we make queries/updates:
 DEPLOYMENT = 'deployment'
@@ -77,7 +77,7 @@ def kubectl(namespace, *args):
 
 
 def k_get(namespace, qry):
-    '''run kubectl get and return parsed json output'''
+    """run kubectl get and return parsed json output"""
 
     # this will raise exception if it fails:
     r = subprocess.check_output(kubectl(namespace, 'get', '--output=json', qry))
@@ -403,8 +403,8 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
     wait_for_progress = 40  # time to wait for rollout to complete
 
     part = 1.0 / float(t)
-    p = 0.0
-    m = 'updating {}'.format(obj)
+    # p = 0.0
+    # m = 'updating {}'.format(obj)
 
     dbg_log('waiting for update: deployment {}, generation {}'.format(obj, patch_gen))
 
@@ -416,7 +416,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
 
     w = Waiter(wait_for_gen, 2)
     while w.wait():
-        # no progress prints here, this wait should be short
+        # NOTE: no progress prints here, this wait should be short
         r = k_get(appname, DEPLOYMENT + '/' + obj)
 
         # ydump('tst_wait{}_output_{}.yaml'.format(rc, obj), r)
@@ -444,7 +444,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1):
         available_replicas = r['status'].get('availableReplicas', 0)  # use get(), item is not always present!
         dbg_log('... checking replica count: spec {}, status {}'.format(r['spec']['replicas'], available_replicas))
 
-        # JIC: this shouldn't wait anymore, if dep. is not 'progressing' anymore
+        # NOTE: JIC: this shouldn't wait anymore, if dep. is not 'progressing' anymore
         p = 2.0
         m = 'waiting for replicas update {}'.format(obj)
         if available_replicas >= r['spec']['replicas']:
@@ -490,7 +490,7 @@ def update(appname, data, print_progress):
     patchlst = {}
     # FIXME: NB: app-wide settings not supported
 
-    # step-down in data if a 'state' key is provided at the top (FIXME: off-spec)
+    # FIXME: off-spec; step-down in data if a 'state' key is provided at the top.
     if 'state' in data:
         data = data['state']
 
