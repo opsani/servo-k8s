@@ -28,7 +28,7 @@ MEM_STEP = 64 * 1024 * 1024  # minimal useful increment in mem limit/reserve, by
 CPU_STEP = 0.01  # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
 MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
 MAX_CPU = 4.0  # cores
-# MAX_REPLICAS=1000 # arbitrary, TBD
+# MAX_REPLICAS = 1000 # arbitrary, TBD
 
 # the k8s obj to which we make queries/updates:
 DEPLOYMENT = "deployment"
@@ -113,7 +113,7 @@ def kubectl(namespace, *args):
     return r + list(args)
 
 def k_get(namespace, qry):
-    '''run kubectl get and return parsed json output'''
+    """run kubectl get and return parsed json output"""
 
     if not isinstance(qry, list):
         qry = [qry]
@@ -524,7 +524,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
 
     w = Waiter(wait_for_gen, 2)
     while w.wait():
-        # no progress prints here, this wait should be short
+        # NOTE: no progress prints here, this wait should be short
         r = k_get(appname, DEPLOYMENT+"/"+obj)
         #ydump("tst_wait{}_output_{}.yaml".format(rc,obj),r) ; rc = rc+1
 
@@ -594,7 +594,7 @@ def update(appname, data, print_progress):
     # TODO: new item: cfg.get("settlement", 0)
     # TODO: new item: cfg.get("userdataa", {}).get("deployment", None) # ref app name
 
-    # step-down in data if a 'state' key is provided at the top (FIXME: off-spec)
+    # FIXME: off-spec; step-down in data if a 'state' key is provided at the top.
     if 'state' in data:
         data = data['state']
 
