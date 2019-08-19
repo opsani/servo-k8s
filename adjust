@@ -490,11 +490,18 @@ def update(namespace, desc, data, print_progress):
         replicas = None
         comp_desc = desc['application']['components'].get(comp_name) or {}
 
+        # Define deployment name and container name, and verify it's existence
         cont_name = None
         dep_name = comp_name
         if '/' in dep_name:
             dep_name, cont_name = dep_name.split('/', 1)
+        assert dep_name in raw, 'Cannot find deployment with name "{}" for component "{}" in namespace "{}"' \
+                                ''.format(dep_name, comp_name, namespace)
         cont_name = cont_name or raw[dep_name]['spec']['template']['spec']['containers'][0]['name']
+        available_conts = set(c['name'] for c in raw[dep_name]['spec']['template']['spec']['containers'])
+        assert cont_name in available_conts, 'Could not find container with name "{}" in deployment "{}" ' \
+                                             'for component "{}" in namespace "{}".'.format(cont_name, dep_name,
+                                                                                            comp_name, namespace)
         cont_patch = cont_patches.setdefault(cont_name, {})
 
         command = comp_desc.get('command')
