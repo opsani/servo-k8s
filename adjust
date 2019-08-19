@@ -460,8 +460,7 @@ def setting_value(x):
     return x
 
 
-def update(namespace, data, print_progress):
-    desc = read_desc()
+def update(namespace, desc, data, print_progress):
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(namespace, desc)
@@ -602,7 +601,7 @@ class K8sAdjust(Adjust):
     def query(self):
         try:
             desc = read_desc()
-        except ConfigError as e:
+        except (ConfigError, AssertionError) as e:
             print(json.dumps({'error': 'config', 'class': 'config', 'message': str(e)}))
             sys.exit(3)
         desc.pop('driver', None)
@@ -615,7 +614,12 @@ class K8sAdjust(Adjust):
 
     def adjust(self, data=None):
         try:
-            update(self.app_id, data, self._progress)
+            try:
+                desc = read_desc()
+            except (ConfigError, AssertionError) as e:
+                print(json.dumps({'error': 'config', 'class': 'config', 'message': str(e)}))
+                sys.exit(3)
+            update(self.app_id, desc, data, self._progress)
         except (ApiError, DeployError) as e:
             print(json.dumps({'error': e.__class__.__name__, 'class': 'failure', 'message': str(e)}))
             sys.exit(3)
