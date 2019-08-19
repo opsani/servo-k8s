@@ -195,7 +195,6 @@ def issetting(s):
 
 def raw_query(namespace, desc):
     """
-    NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names' used to limit tunable deployments.
     Read the list of deployments in a namespace and fill in data into desc.
     Both the input 'desc' and the return value are in the 'settings query response' format.
     NOTE only 'cpu', 'memory' and 'replicas' settings are filled in even if not present in desc.
