@@ -137,14 +137,25 @@ def read_desc():
         desc = yaml.load(f)
     except IOError as e:
         if e.errno == errno.ENOENT:
-            return {} # only if 'file not found'
+            raise ConfigError('configuration file {} does not exist'.format(DESC_FILE))
         raise ConfigError('cannot read configuration from {}: {}'.format(DESC_FILE, e.strerror))
     except yaml.error.YAMLError as e:
         raise ConfigError('syntax error in {}: {}'.format(DESC_FILE, str(e)))
 
-    # everything else: crash
+    refer_tip = 'You can refer to a sample configuration in README.md.'
+    assert bool(desc), 'Configuration file is empty.'
+    assert 'k8s' in desc and desc['k8s'], 'No configuration were defined for K8s driver in config file {}. ' \
+                                          'Please set up configuration for deployments under key "k8s". ' \
+                                          '{}'.format(DESC_FILE, refer_tip)
+    desc = desc['k8s']
 
-    return desc.get('k8s', {})
+    assert 'application' in desc and desc['application'], \
+        'Section "application" was not defined in a configuration file. {}'.format(refer_tip)
+    assert 'components' in desc['application'] and desc['application']['components'] is not None, \
+        'Section "components" was not defined in a configuration file section "application". {}'.format(refer_tip)
+    assert len(desc['application']['components']), 'No components were defined in a configuration file. ' \
+                                                   'Please define at least one component. {}'.format(refer_tip)
+    return desc
 
 def numval(v, minv, maxv, step=1.0):
     """shortcut for creating linear setting descriptions"""
@@ -214,7 +225,7 @@ def issetting(s):
     return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
 
 
-def raw_query(appname, desc=None):
+def raw_query(appname, desc):
     '''read the list of deployments for appname and fill in data into desc (or create blank desc,
     if not provided).  both the input 'desc' and the return value are in the 'settings query
     response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names'
@@ -222,13 +233,10 @@ def raw_query(appname, desc=None):
     NOTE only cpu/memory settings and replicas are filled in even if not present in desc.
     Other settings must have a description in 'desc' to be returned.
     '''
-    if isinstance(desc, dict):
-        desc = copy.deepcopy(desc)
-    if not desc:
-        desc = {"application":{}}
+    desc = copy.deepcopy(desc)
 
-    app = desc.setdefault("application", {})
-    comps = app.setdefault("components", {})
+    app = desc["application"]
+    comps = app["components"]
 
     cfg = desc.pop("control", {}) # FIXME TODO - query doesn't receive data from remote, only the local cfg can be used; where in the data should the "control" section really be?? note, [userdata][deployment] sub-keys for specifying the 'reference' app means we have to have that 'reference' as a single deployment and it has to be excluded from enumeration as an 'adjustable' component, using the whitelist.
     refapp = cfg.get("userdata", {}).get("deployment", None)
@@ -403,7 +411,7 @@ def dbg_log(*args):
         print(*args, file=sys.stderr)
 
 
-def query(appname, desc=None):
+def query(appname, desc):
     r, _ = raw_query(appname, desc)
     return r
 
