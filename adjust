@@ -555,8 +555,7 @@ def _value(x):
     return x
 
 
-def update(appname, data, print_progress):
-    desc = read_desc()
+def update(appname, desc, data, print_progress):
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, desc)
@@ -750,10 +749,11 @@ class K8sAdjust(Adjust):
 
     def adjust(self, data):
         try:
-            r = update(self.app_id, data, self._progress)
+            desc = read_desc()
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         # all other exceptions: default handler - stack trace and sys.exit(1)
+        r = update(self.app_id, desc, data, self._progress)
         return r
 
 
