@@ -269,20 +269,6 @@ def raw_query(namespace, desc=None):
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get('env', [])
         cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
-        for ev in cont_env_list:
-            # skip env vars that match the pre-defined setting names above
-            if ev['name'] in ('mem', 'cpu', 'replicas'):
-                continue
-            if ev['name'] in settings:
-                s = settings[ev['name']]
-                if s.get('type', 'linear') == 'linear':
-                    try:
-                        s['value'] = float(ev['value'])
-                    except ValueError:
-                        raise ConfigError('invalid value found in environment {}={}, it was expected to be numeric'
-                                          ''.format(ev['name'], ev['value']))
-                else:
-                    s['value'] = ev['value']
 
         env = comp.get('env')
         if env:
@@ -538,8 +524,6 @@ def update(namespace, data, print_progress):
                 continue
             elif name == 'replicas':
                 replicas = int(value)
-            else:  # env var setting
-                cont_patch.setdefault('env', []).append({'name': name, 'value': str(value)})
 
         comp_patch = comp_patches.setdefault(comp_name, {})
         if cont_patches:  # convert to array
