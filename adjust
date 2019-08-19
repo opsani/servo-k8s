@@ -248,8 +248,8 @@ def raw_query(namespace, desc):
         #        (a namespace can have a default mem limit, but that's not necessarily set, either)
         # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
         # TODO: allow min/max/step overrides for mem/cpu settings in the config file
-        comps[full_comp_name] = comp = comps[full_comp_name] or {}
-        settings = comp.setdefault('settings', {})
+        comp = comps[full_comp_name] = comps[full_comp_name] or {}
+        settings = comp['settings'] = comp.setdefault('settings', {}) or {}
         res = cont.get('resources')
         if res:
             # (value, min, max, step) all in GiB
