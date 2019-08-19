@@ -329,26 +329,32 @@ def raw_query(appname, desc):
         imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
         comp = comps[full_comp_name] = comps[full_comp_name] or {}
         settings = comp["settings"] = comp.setdefault("settings", {}) or {}
+        read_mem = not settings or 'mem' in settings
+        read_cpu = not settings or 'cpu' in settings
+        read_replicas = not settings or 'replicas' in settings
         res = cont.get("resources")
         if res:
-            # (value, min, max, step) all in GiB
-            settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
-                                     minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
-                                     maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
-                                     step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi))
-            # (value, min, max, step), all in CPU cores
-            settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
-                                     minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
-                                     maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
-                                     step=(settings.get('cpu') or {}).get('step', CPU_STEP))
+            if read_mem:
+                # (value, min, max, step) all in GiB
+                settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
+                                         minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
+                                         maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
+                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi))
+            if read_cpu:
+                # (value, min, max, step), all in CPU cores
+                settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
+                                         minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
+                                         maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
+                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP))
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
         # settings["replicas"] = numval(v=replicas, minv=1, maxv=MAX_REPLICAS, step=1)
-        settings["replicas"] = numval(v=replicas,
-                                      minv=(settings.get('replicas') or {}).get('min', replicas),
-                                      maxv=(settings.get('replicas') or {}).get('max', replicas),
-                                      step=(settings.get('replicas') or {}).get('step', 1))
+        if read_replicas:
+            settings["replicas"] = numval(v=replicas,
+                                          minv=(settings.get('replicas') or {}).get('min', replicas),
+                                          maxv=(settings.get('replicas') or {}).get('max', replicas),
+                                          step=(settings.get('replicas') or {}).get('step', 1))
 
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get("env", [])
