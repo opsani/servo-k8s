@@ -106,7 +106,7 @@ def read_desc():
     refer_tip = 'You can refer to a sample configuration in README.md.'
     assert bool(desc), 'Configuration file is empty.'
     assert 'k8s' in desc and desc['k8s'], 'No configuration were defined for K8s driver in config file {}. ' \
-                                          'Please set up configuration for deployments under key "k8s". ' \
+                                          'Please, set up configuration for deployments under key "k8s". ' \
                                           '{}'.format(DESC_FILE, refer_tip)
     desc = desc['k8s']
 
@@ -115,7 +115,8 @@ def read_desc():
     assert 'components' in desc['application'] and desc['application']['components'] is not None, \
         'Section "components" was not defined in a configuration file section "application". {}'.format(refer_tip)
     assert len(desc['application']['components']), 'No components were defined in a configuration file. ' \
-                                                   'Please define at least one component. {}'.format(refer_tip)
+                                                   'Please, define at least one component. {}'.format(refer_tip)
+
     return desc
 
 
@@ -208,21 +209,21 @@ def raw_query(namespace, desc):
     dep_rsp = k_get(namespace, DEPLOYMENT)
     deps_list = dep_rsp['items']
     deps_dict = {dep['metadata']['name']: dep for dep in deps_list}
-    for full_comp_name in comps.keys():
-        dep_name = full_comp_name
+    for comp_name in comps.keys():
+        dep_name = comp_name
         cont_name = None
         if '/' in dep_name:
-            dep_name, cont_name = full_comp_name.split('/')
+            dep_name, cont_name = comp_name.split('/')
         assert dep_name in deps_dict, \
             'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
-            ''.format(dep_name, full_comp_name, namespace)
+            ''.format(dep_name, comp_name, namespace)
         dep = deps_dict[dep_name]
         conts = dep['spec']['template']['spec']['containers']
         if cont_name is not None:
             conts_dict = {c['name']: c for c in conts}
             assert cont_name in conts_dict, \
                 'Could not find container with name "{}" in deployment "{}" for component "{}" in namespace "{}".' \
-                ''.format(cont_name, dep_name, full_comp_name, namespace)
+                ''.format(cont_name, dep_name, comp_name, namespace)
             cont = conts_dict[cont_name]
         else:
             cont = conts[0]
@@ -248,7 +249,7 @@ def raw_query(namespace, desc):
         #        (a namespace can have a default mem limit, but that's not necessarily set, either)
         # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
         # TODO: allow min/max/step overrides for mem/cpu settings in the config file
-        comp = comps[full_comp_name] = comps[full_comp_name] or {}
+        comp = comps[comp_name] = comps[comp_name] or {}
         settings = comp['settings'] = comp.setdefault('settings', {}) or {}
         read_mem = not settings or 'mem' in settings
         read_cpu = not settings or 'cpu' in settings
@@ -553,9 +554,9 @@ def update(namespace, desc, data, print_progress):
                 .setdefault('template', {}) \
                 .setdefault('spec', {}) \
                 .setdefault('containers', [])
-            for n, v in cont_patches.items():
-                v['name'] = n
-                patches.append(v)
+            for name, value in cont_patches.items():
+                value['name'] = name
+                patches.append(value)
 
         if replicas is not None:
             comp_patch.setdefault('spec', {})['replicas'] = replicas
@@ -572,11 +573,11 @@ def update(namespace, desc, data, print_progress):
 
     # execute patch commands
     patched_count = 0
-    for n, v in comp_patches.items():
+    for name, value in comp_patches.items():
         # ydump('tst_before_output_{}.yaml'.format(n), k_get(namespace, DEPLOYMENT + '/' + n))
         # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
-        patchstr = json_enc(v)
-        patch_r = k_patch(namespace, DEPLOYMENT, n, patchstr)
+        patchstr = json_enc(value)
+        patch_r = k_patch(namespace, DEPLOYMENT, name, patchstr)
         if test_dep_generation(patch_r, patch_r['metadata']['generation']) and test_dep_progress(patch_r):
             # patch made no changes, skip wait_for_update:
             patched_count = patched_count + 1
@@ -586,17 +587,17 @@ def update(namespace, desc, data, print_progress):
 
         # wait for update to complete (and print progress)
         try:
-            wait_for_update(namespace, n, patch_r['metadata']['generation'], print_progress, patched_count,
+            wait_for_update(namespace, name, patch_r['metadata']['generation'], print_progress, patched_count,
                             len(comp_patches))
         except DeployError as e:
             if not os.getenv('TDR_DEBUG_NO_UNDO'):
                 try:
-                    subprocess.call(['kubectl', 'rollout', 'undo', DEPLOYMENT + '/' + n])
+                    subprocess.call(['kubectl', 'rollout', 'undo', DEPLOYMENT + '/' + name])
                     # FIXME: use the kubectl() function so that we pickup any
                     #        appended cmdline args, e.g., namespace, server, token etc.
                 except subprocess.CalledProcessError:
                     # TODO: progress msg with warning
-                    print('undo for {} failed: {}'.format(n, e), file=sys.stderr)
+                    print('undo for {} failed: {}'.format(name, e), file=sys.stderr)
             raise
         patched_count = patched_count + 1
 
@@ -615,7 +616,7 @@ VERSION = '1.2'
 
 class K8sAdjust(Adjust):
 
-    def _progress(self, progress, message):
+    def report_progress(self, progress, message):
         """adapter for the default base class implementation of progress message"""
         self.progress = progress
         self.print_progress(message=message)
@@ -641,7 +642,7 @@ class K8sAdjust(Adjust):
             except (ConfigError, AssertionError) as e:
                 print(json.dumps({'error': 'config', 'class': 'config', 'message': str(e)}))
                 sys.exit(3)
-            update(self.app_id, desc, data, self._progress)
+            update(self.app_id, desc, data, self.report_progress)
         except (ApiError, DeployError) as e:
             print(json.dumps({'error': e.__class__.__name__, 'class': 'failure', 'message': str(e)}))
             sys.exit(3)
