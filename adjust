@@ -32,12 +32,6 @@ MAX_CPU = 4.0  # cores
 DEPLOYMENT = "deployment"
 #DEPLOYMENT="deployment.v1.apps" #new, not supported in 1.8 (it has v1beta1)
 
-class ApiError(Exception):
-    pass
-
-class DeployError(Exception): # raised when deploy ends in failed status
-    pass
-
 class ConfigError(Exception): # user-provided descriptor not readable
     pass
 
@@ -189,7 +183,7 @@ def raw_query(appname, desc=None):
         desc["application"] = {}
     comps = desc["application"].setdefault("components", {})
 
-    cfg = desc.get("control", {}) # FIXME TODO - query doesn't receive data from remote, only the local cfg can be used; where in the data should the "control" section really be?? note, [userdata][deployment] sub-keys for specifying the 'reference' app means we have to have that 'reference' as a single deployment and it has to be excluded from enumeration as an 'adjustable' component, using the whitelist.
+    cfg = desc.pop("control", {}) # FIXME TODO - query doesn't receive data from remote, only the local cfg can be used; where in the data should the "control" section really be?? note, [userdata][deployment] sub-keys for specifying the 'reference' app means we have to have that 'reference' as a single deployment and it has to be excluded from enumeration as an 'adjustable' component, using the whitelist.
     refapp = cfg.get("userdata", {}).get("deployment", None)
     mon_data = {}
     if refapp:
@@ -449,7 +443,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
             break
 
     if w.expired:
-        raise DeployError("update of {} failed, timed out waiting for k8s object update".format(obj))
+        raise AdjustError("update of {} failed, timed out waiting for k8s object update".format(obj), status="failed", reason="adjust-failed")
 
     dbg_log('waiting for progress: deployment {}, generation {}'.format(obj, patch_gen))
 
@@ -470,7 +464,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
             break
 
     # loop ended, timed out:
-    raise DeployError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err))
+    raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
 
 rsrc_map = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
 def set_rsrc(cp, sn, sv):
@@ -592,7 +586,10 @@ def update(appname, data, print_progress):
             # ydump("tst_before_output_{}.yaml".format(n), k_get(appname, DEPLOYMENT + "/" + n))
             # run: kubectl patch deployment[.v1.apps] $n -p "{jsondata}"
             patchstr = json_enc(v)
-            patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
+            try:
+                patch_r = k_patch(appname, DEPLOYMENT, n, patchstr)
+            except Exception as e: # TODO: limit to expected errors
+                raise AdjustError(str(e), status="failed", reason="adjust-failed")
             p, _ = test_dep_progress(patch_r)
             if test_dep_generation(patch_r, patch_r["metadata"]["generation"]) and p == 1.0:
                 # patch made no changes, skip wait_for_update:
@@ -605,8 +602,11 @@ def update(appname, data, print_progress):
             # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
             try:
                 wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, c, len(patchlst), cfg.get("timeout", 630))
-            except DeployError as e:
-                if not os.getenv("TDR_DEBUG_NO_UNDO"):
+            except AdjustError as e:
+                if e.reason != "start-failed": # not undo-able
+                    raise
+                onfail = cfg.get("on_fail", "keep") # valid values: keep, destroy, rollback (destroy == scale-to-zero, not supported)
+                if onfail == "rollback":
                     try:
                         subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
                         print("UNDONE", file=sys.stderr)
@@ -621,8 +621,15 @@ def update(appname, data, print_progress):
     # post-adjust settlement, if enabled
     testdata0, raw = raw_query(appname, d)
     settlement_time = cfg.get("settlement", 0)
+    mon0 = testdata0["monitoring"]
+
+    if mon0["version_id"] != mon0["ref_version_id"]:
+        raise AdjustError("application version does not match reference version", status="aborted", reason="version-mismatch")
+
+# aborted status reasons that aren't supported: ref-app-inconsistent, ref-app-unavailable
+
     if not settlement_time:
-        return {"monitoring":testdata0["monitoring"], "status":"ok", "reason":"success"}
+        return {"monitoring":mon0, "status":"ok", "reason":"success"}
 
 # TODO: adjust progress accounting when there is settlement_time!=0
 
@@ -630,7 +637,20 @@ def update(appname, data, print_progress):
     w = waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
     while w.wait():
         testdata, raw = raw_query(appname, d)
+        mon = testdata["monitoring"]
         # compare to initial mon data set
+        if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
+            # TODO: allow limited number of restarts? (and how to distinguish from rejected/unstable??)
+            raise AdjustError("component(s) restart detected", status="transient-failure", reason="app-restart")
+# TODO: what to do with version change?
+#        if mon["version_id"] != mon0["version_id"]:
+#            raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
+        if mon["spec_id"] != mon0["spec_id"]:
+            raise AdjustError("application configuration was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
+        if mon["ref_spec_id"] != mon0["ref_spec_id"]:
+            raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
+        if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
+            raise AdjustError("", status="transient-failure", reason="ref-app-scale")
 
     # update() return
 
@@ -655,17 +675,12 @@ class K8sAdjust(Adjust):
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         d.pop("driver", None)
-        try:
-            r = query(self.app_id, d)
-        except (ApiError, DeployError) as e: # FIXME: modify err types and set reason properly
-            raise AdjustError(str(e), reason="")
+        r = query(self.app_id, d)
         return r
 
     def adjust(self, data):
         try:
             r = update(self.app_id, data, self._progress)
-        except (ApiError, DeployError) as e: # FIXME: modify err types and set reason properly
-            raise AdjustError(str(e), reason="")
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         # all other exceptions: default handler - stack trace and sys.exit(1)
