@@ -563,7 +563,7 @@ def update(namespace, desc, data, print_progress):
             elif name == 'replicas':
                 replicas = int(value)
 
-        comp_patch = comp_patches.setdefault(comp_name, {})
+        comp_patch = comp_patches.setdefault(dep_name, {})
         if cont_patches:  # convert to array
             patches = comp_patch \
                 .setdefault('spec', {}) \
