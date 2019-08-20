@@ -10,6 +10,7 @@ import subprocess
 import time
 
 from collections import Iterable
+from functools import reduce
 
 import json
 import yaml
@@ -155,6 +156,21 @@ def read_desc():
         'Section "components" was not defined in a configuration file section "application". {}'.format(refer_tip)
     assert len(desc['application']['components']), 'No components were defined in a configuration file. ' \
                                                    'Please define at least one component. {}'.format(refer_tip)
+
+    comps = desc['application']['components']
+    replicas_tracker = {}
+    for name, comp in comps.items():
+        settings = (comp.get('settings') or {})
+        if 'replicas' in settings:
+            dep_name = name.split('/')[0] if '/' in name else name
+            replicas_tracker.setdefault(dep_name, 0)
+            replicas_tracker[dep_name] += 1
+
+    if len(replicas_tracker) < sum(replicas_tracker.values()):
+        rotten_deps = map(lambda d: d[0], filter(lambda c: c[1] > 1, replicas_tracker.items()))
+        raise Exception('Some components have more than one setting "replicas" defined. Specifically: {}. '
+                        'Please, keep only one "replicas" per deployment.'.format(', '.join(rotten_deps)))
+
     return desc
 
 def numval(v, minv, maxv, step=1.0):
