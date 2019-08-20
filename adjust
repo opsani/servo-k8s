@@ -677,7 +677,7 @@ def update(appname, desc, data, print_progress):
             elif name == "replicas":
                 replicas = int(value)
 
-        patch = patchlst.setdefault(comp_name, {})
+        patch = patchlst.setdefault(dep_name, {})
         if patches:  # convert to array
             cp = patch \
                 .setdefault('spec', {}) \
