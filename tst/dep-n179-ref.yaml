@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-ref
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-ref
+  template:
+    metadata:
+      labels:
+        app: nginx-ref
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - containerPort: 80
