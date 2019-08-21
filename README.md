@@ -48,6 +48,10 @@ Limitations:
 - works only on `deployment` objects, other types of controllers are not supported.
 - each container in a Deployment is treated as a separate `component`, however, the `replicas` setting cannot be controlled individually for the containers in the same deployment. If `replicas` is set for multi-container deployment and the values are different for different containers, the resulting adjustment becomes unpredictable. Please, define only one `replicas` setting per component-deployment.
 
-## Test requrements
+## Test requirements
+
+Tests are meant to be run by `pytest`. Install `pytest` with `pip install pytest`.
 
 `tst/test_encoders.py` requires `base.py` and `jvm.py` to be present in `encoders/` in the root directory. `base.py` can be downloaded from https://github.com/opsani/servo/tree/master/encoders. `jvm.py` can be downloaded from https://github.com/opsani/encoder-jvm/tree/master/encoders.
+
+All the tests require `adjust.py` to be present in the root directory. `adjust.py` can be downloaded from https://github.com/opsani/servo.
