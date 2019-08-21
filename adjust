@@ -231,11 +231,19 @@ def encode_encoder(settings, config, expected_type=None, exception_context='an e
         raise Exception('Error while handling {}: {}'.format(exception_context, str(e)))
 
 
+def islookinglikerangesetting(s):
+    return 'min' in s or 'max' in s or 'step' in s
+
+
+def islookinglikeenumsetting(s):
+    return 'values' in s
+
+
 def israngesetting(s):
-    return s.get('type') == 'range'
+    return s.get('type') == 'range' or islookinglikerangesetting(s)
 
 def isenumsetting(s):
-    return s.get('type') == 'enum'
+    return s.get('type') == 'enum' or islookinglikeenumsetting(s)
 
 def issetting(s):
     return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
