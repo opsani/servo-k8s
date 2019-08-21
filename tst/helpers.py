@@ -26,7 +26,7 @@ def adjust(*args, stdin=None):
         # take only the last line, if there are many (this discards any 'progress' lines)
         stdout = r.stdout.strip().split(b"\n")[-1]
         # return r.returncode, json.loads(stdout) # direct json.loads() of bytes doesn't work before py 3.6
-        print(">>>", stdout.decode("UTF-8"), "<<<")
+        # print(">>>", stdout.decode("UTF-8"), "<<<")
         return r.returncode, json.loads(stdout.decode("UTF-8"))
     else:
         return r.returncode, None
@@ -45,4 +45,12 @@ def setcfg(fname):
         os.symlink(fname, CONFIG)
     finally:
         os.chdir(old_dir)
+
+def run(cmd):
+    """basic execution of a command, stdout and stderr are not redirected (end up in py.test logs), raise exception on errors"""
+    subprocess.run(cmd, shell=True, check=True)
+
+def silent(cmd):
+    """run a command and ignore stdout/stderr and non-zero exit status"""
+    subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
