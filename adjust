@@ -195,7 +195,7 @@ def raw_query(appname, desc=None):
         d2["application"] = {"components":{}} # empty it, we want only what's found automatically (the ref deployment)
         try:
             refqry, _ = raw_query(appname, d2)
-        except (ApiError, AdjustError) as e:
+        except AdjustError as e:
             raise AdjustError(str(e), status="aborted", reason="ref-app-unavailable")
         # let other exceptions go unchanged
 
@@ -213,6 +213,9 @@ def raw_query(appname, desc=None):
     d = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
     d = d["items"]
+    if not d: # NOTE we don't distinguish the case when the namespace doesn't exist at all or is just empty (k8s will return an empty list whether or not it exists)
+        raise AdjustError("application '{}' does not exist or has no components".format(appname),
+            status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
     raw_specs = {}
     imgs = {}
     runtime_ids = {}
@@ -310,6 +313,11 @@ def raw_query(appname, desc=None):
                 # Remove command section from descriptor
                 if 'command' in comp:
                     del comp['command']
+
+
+    if not runtime_ids:
+        raise AdjustError("application '{}' has no components".format(appname),
+            status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
 
     # app state data
     # (NOTE we strip the component names because our (single-component) 'reference' app will necessarily have a different component name)

@@ -40,11 +40,12 @@ def test_info(simple_app):
     assert data["version"] # should be present and not empty
 
 # FAIL: driver returns seemingly normal data, even if app is not present at all (data is from defaults in the config file)
-@pytest.mark.skipif(True, reason="BUG")
+#@pytest.mark.skipif(True, reason="BUG")
 def test_noapp(simple_app):
-    setcfg("config_basic.yaml")
+    setcfg("config_single.yaml")
     exit_code, data = adjust("--describe", "not-here")
     assert exit_code != 0
     assert data and isinstance(data, dict)
     # TBD: status/reason tests
-
+    assert data["status"] == "aborted"
+    assert data["reason"] == "app-unavailable" # FIXME, not a documented 'reason' code
