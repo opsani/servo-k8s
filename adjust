@@ -754,7 +754,7 @@ def update(appname, desc, data, print_progress):
     settlement_time = cfg.get("settlement", 0)
     mon0 = testdata0["monitoring"]
 
-    if mon0["version_id"] != mon0["ref_version_id"]:
+    if "ref_version_id" in mon0 and mon0["version_id"] != mon0["ref_version_id"]:
         raise AdjustError("application version does not match reference version", status="aborted", reason="version-mismatch")
 
 # aborted status reasons that aren't supported: ref-app-inconsistent, ref-app-unavailable
