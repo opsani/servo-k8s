@@ -614,13 +614,13 @@ def update(appname, desc, data, print_progress):
             dep_name, cont_name = comp_name.split('/', 1)
         if dep_name not in raw:
             raise AdjustError('Cannot find deployment with name "{}" for component "{}" in namespace "{}"' \
-+                                ''.format(dep_name, comp_name, namespace), status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
++                                ''.format(dep_name, comp_name, appname), status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
         cont_name = cont_name or raw[dep_name]["spec"]["template"]["spec"]["containers"][0]["name"]  # chk for KeyError FIXME
         available_conts = set(c['name'] for c in raw[dep_name]['spec']['template']['spec']['containers'])
         if cont_name not in available_conts:
             raise AdjustError('Could not find container with name "{}" in deployment "{}" ' \
                                              'for component "{}" in namespace "{}".'.format(cont_name, dep_name,
-                                                                                            comp_name, namespace),
+                                                                                            comp_name, appname),
                               status="failed",
                               reason="unknown") # see note above
 
