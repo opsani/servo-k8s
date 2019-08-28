@@ -267,21 +267,21 @@ def raw_query(appname, desc=None):
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
     for full_comp_name in comps.keys():
-        dname = full_comp_name
-        cname = None
-        if '/' in dname:
-            dname, cname = full_comp_name.split('/')
-        assert dname in deps_dict, 'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
-            ''.format(dname, full_comp_name, appname)
-        dep = deps_dict[dname]
+        dep_name = full_comp_name
+        cont_name = None
+        if '/' in dep_name:
+            dep_name, cont_name = full_comp_name.split('/')
+        assert dep_name in deps_dict, 'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
+            ''.format(dep_name, full_comp_name, appname)
+        dep = deps_dict[dep_name]
         conts = dep['spec']['template']['spec']['containers']
-        if cname is not None:
+        if cont_name is not None:
             contsd = {c['name']: c for c in conts}
-            assert cname in contsd, \
+            assert cont_name in contsd, \
                 'Could not find container with name "{}" in deployment "{}" ' \
                 'for component "{}" in namespace "{}".' \
-                ''.format(cname, dname, full_comp_name, appname)
-            cont = contsd[cname]
+                ''.format(cont_name, dep_name, full_comp_name, appname)
+            cont = contsd[cont_name]
         else:
             cont = conts[0]
 
@@ -301,19 +301,19 @@ def raw_query(appname, desc=None):
                 continue
         except ValueError as e: # int() is the only thing that should trigger exceptions here
             #TODO add warning to annotations to be returned
-            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dname, type(e).__name__, str(e)), file=sys.stderr)
+            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dep_name, type(e).__name__, str(e)), file=sys.stderr)
             # pass # fall through, ignore unparseable label
 
         # list of pods, for runtime_id
         pods = k_get(appname, ["-l", sel, "pods"])
         pods = pods["items"]
-        runtime_ids[dname] = [pod["metadata"]["uid"] for pod in pods]
+        runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
 
         # extract deployment settings
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
-        raw_specs[dname] = tmplt_spec # save for later, used to checksum all specs
+        raw_specs[dep_name] = tmplt_spec # save for later, used to checksum all specs
 
         # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
         # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
@@ -322,10 +322,10 @@ def raw_query(appname, desc=None):
         imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
         comps[full_comp_name] = comp = comps[full_comp_name] or {}
         settings = comp.setdefault("settings", {})
-        r = cont.get("resources")
-        if r:
-            settings["mem"] = numval(memunits(r.get("limits", {}).get("memory", "0"))/Gi, MEM_STEP/Gi, MAX_MEM/Gi, MEM_STEP/Gi) # (value,min,max,step) all in GiB
-            settings["cpu"] = numval(cpuunits(r.get("limits", {}).get("cpu", "0")), CPU_STEP, MAX_CPU, CPU_STEP) # (value,min,max,step), all in CPU cores
+        res = cont.get("resources")
+        if res:
+            settings["mem"] = numval(memunits(res.get("limits", {}).get("memory", "0"))/Gi, MEM_STEP/Gi, MAX_MEM/Gi, MEM_STEP/Gi) # (value,min,max,step) all in GiB
+            settings["cpu"] = numval(cpuunits(res.get("limits", {}).get("cpu", "0")), CPU_STEP, MAX_CPU, CPU_STEP) # (value,min,max,step), all in CPU cores
             #TODO: adjust min/max to include current values (e.g., increase mem_max to at least current if current > max)
 
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
