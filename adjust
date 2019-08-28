@@ -269,8 +269,11 @@ def raw_query(appname, desc):
         c2 = copy.deepcopy(cfg)
         c2["userdata"].pop("deployment", None)
         d2["control"] = c2
-        # d2["whitelist_deployment_names"] = [refapp] # FIXME FIXME: line below should be re-done, modify 'components' to point to refapp
-        d2["application"] = {"components":{}} # empty it, we want only what's found automatically (the ref deployment)
+        if len(comps) != 1: # 'reference app' works only with single-component (due to the use of deployment name as 'component name' and having both apps in the same namespace)
+            raise AdjustError("operation with reference app not possible when multiple components are defined",
+                              status="aborted", reason="ref-app-unavailable")
+        refcomps = {refapp: comps[list(comps.keys())[0]]}
+        d2["application"] = {"components":refcomps} # single component, renamed (so we pick the 'reference deployment' in the same namespace)
         try:
             refqry, _ = raw_query(appname, d2)
         except AdjustError as e:
@@ -344,6 +347,7 @@ def raw_query(appname, desc):
         # NOTE: generation, resourceVersion and uid can help detect changes
         # (also, to check PG's k8s code in oco)
         replicas = dep["spec"]["replicas"]
+        tmplt_spec = dep["spec"]["template"]["spec"]
         raw_specs[dep_name] = tmplt_spec # save for later, used to checksum all specs
 
         # name, env, resources (limits { cpu, memory }, requests { cpu, memory })

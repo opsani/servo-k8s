@@ -1,7 +1,5 @@
 k8s:
    whitelist_deployment_names: ["nginx-deployment"]
-   control:
-      userdata: {"deployment":"nginx-ref"}
    application:
       components:
          nginx-deployment:
