@@ -331,16 +331,24 @@ def raw_query(appname, desc):
         settings = comp.setdefault("settings", {})
         res = cont.get("resources")
         if res:
-            settings["mem"] = numval(memunits(res.get("limits", {}).get("memory", "0"))/Gi, MEM_STEP/Gi, MAX_MEM/Gi, MEM_STEP/Gi) # (value,min,max,step) all in GiB
-            settings["cpu"] = numval(cpuunits(res.get("limits", {}).get("cpu", "0")), CPU_STEP, MAX_CPU, CPU_STEP) # (value,min,max,step), all in CPU cores
-            #TODO: adjust min/max to include current values (e.g., increase mem_max to at least current if current > max)
-
+            # (value, min, max, step) all in GiB
+            settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
+                                     minv=MEM_STEP/Gi,
+                                     maxv=MAX_MEM/Gi,
+                                     step=MEM_STEP/Gi)
+            # (value, min, max, step), all in CPU cores
+            settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
+                                     minv=CPU_STEP,
+                                     maxv=MAX_CPU,
+                                     step=CPU_STEP)
+            # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
-        #settings["replicas"] = numval(replicas, 1, MAX_REPLICAS, 1)
-        settings["replicas"] = numval(replicas, replicas, replicas, 1)
+        # settings["replicas"] = numval(v=replicas, minv=1, maxv=MAX_REPLICAS, step=1)
+        settings["replicas"] = numval(v=replicas, minv=replicas, maxv=replicas, step=1)
+
         # current settings of custom env vars (NB: type conv needed for numeric values!)
-        cont_env_list = cont.get("env",[])
+        cont_env_list = cont.get("env", [])
         cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
 
         env = comp.get('env')
