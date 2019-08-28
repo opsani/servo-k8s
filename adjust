@@ -226,13 +226,12 @@ def issetting(s):
 
 
 def raw_query(appname, desc):
-    '''read the list of deployments for appname and fill in data into desc (or create blank desc,
-    if not provided).  both the input 'desc' and the return value are in the 'settings query
-    response' format. NOTE the input 'desc' may also have a top-level key 'whitelist_deployment_names'
-    used to limit tunable deployments.
-    NOTE only cpu/memory settings and replicas are filled in even if not present in desc.
+    """
+    Read the list of deployments in a namespace and fill in data into desc.
+    Both the input 'desc' and the return value are in the 'settings query response' format.
+    NOTE only 'cpu', 'memory' and 'replicas' settings are filled in even if not present in desc.
     Other settings must have a description in 'desc' to be returned.
-    '''
+    """
     desc = copy.deepcopy(desc)
 
     app = desc["application"]
