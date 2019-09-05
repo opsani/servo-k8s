@@ -10,7 +10,6 @@ import subprocess
 import time
 
 from collections import Iterable
-from functools import reduce
 
 import json
 import yaml
@@ -154,8 +153,8 @@ def read_desc():
         'Section "application" was not defined in a configuration file. {}'.format(refer_tip)
     assert 'components' in desc['application'] and desc['application']['components'] is not None, \
         'Section "components" was not defined in a configuration file section "application". {}'.format(refer_tip)
-    assert len(desc['application']['components']), 'No components were defined in a configuration file. ' \
-                                                   'Please define at least one component. {}'.format(refer_tip)
+    assert desc['application']['components'], 'No components were defined in a configuration file. ' \
+                                              'Please define at least one component. {}'.format(refer_tip)
 
     comps = desc['application']['components']
     replicas_tracker = {}
@@ -284,15 +283,16 @@ def raw_query(appname, desc):
         replicas_sum = sum((c["settings"]["replicas"]["value"] for c in refqry["application"]["components"].values()))
         refqry = refqry["monitoring"] # we don't need other data from refqry any more
         mon_data = {"ref_spec_id": refqry["spec_id"],
-                   "ref_runtime_id": refqry["runtime_id"],
-                   "ref_version_id": refqry["version_id"],
-                   "ref_runtime_count": replicas_sum}
+                    "ref_runtime_id": refqry["runtime_id"],
+                    "ref_version_id": refqry["version_id"],
+                    "ref_runtime_count": replicas_sum}
 
     deployments = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
     deps_list = deployments["items"]
     if not deps_list: # NOTE we don't distinguish the case when the namespace doesn't exist at all or is just empty (k8s will return an empty list whether or not it exists)
-        raise AdjustError("application '{}' does not exist or has no components".format(appname),
+        raise AdjustError(
+            "application '{}' does not exist or has no components".format(appname),
             status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
     deps_dict = {dep['metadata']['name']: dep for dep in deps_list}
     raw_specs = {}
@@ -324,10 +324,11 @@ def raw_query(appname, desc):
         try:
             sel = dep["spec"]["selector"]["matchLabels"]
         except KeyError:
-            raise AdjustError("only deployments with matchLabels selector are supported, found selector: {}".format(repr(dep["spec"].get("selector",{}))),
-            status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
+            raise AdjustError(
+                "only deployments with matchLabels selector are supported, found selector: {}".format(repr(dep["spec"].get("selector", {}))),
+                status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
         # convert to string suitable for 'kubect -l labelsel'
-        sel = ','.join(("{}={}".format(k,v) for k,v in sel.items()))
+        sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
 
         # skip if excluded by label
         try:
@@ -353,7 +354,6 @@ def raw_query(appname, desc):
         # name, env, resources (limits { cpu, memory }, requests { cpu, memory })
         # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
         # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
-        # TODO: allow min/max/step overrides for mem/cpu settings in the config file
         imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
         comp = comps[full_comp_name] = comps[full_comp_name] or {}
         settings = comp["settings"] = comp.setdefault("settings", {}) or {}
@@ -377,7 +377,6 @@ def raw_query(appname, desc):
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
-        # settings["replicas"] = numval(v=replicas, minv=1, maxv=MAX_REPLICAS, step=1)
         if read_replicas:
             settings["replicas"] = numval(v=replicas,
                                           minv=(settings.get('replicas') or {}).get('min', replicas),
@@ -426,7 +425,7 @@ def raw_query(appname, desc):
 
     if not runtime_ids:
         raise AdjustError("application '{}' has no components".format(appname),
-            status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
+                          status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
 
     # app state data
     # (NOTE we strip the component names because our (single-component) 'reference' app will necessarily have a different component name)
@@ -434,10 +433,10 @@ def raw_query(appname, desc):
     raw_specs = [raw_specs[k] for k in sorted(raw_specs.keys())]
     imgs = [imgs[k] for k in sorted(imgs.keys())]
     mon_data.update({"spec_id": get_hash(raw_specs),
-                  "runtime_id": get_hash(runtime_ids),
-                  "version_id": get_hash(imgs),
-                   # "runtime_count": replicas_sum
-                 })
+                     "runtime_id": get_hash(runtime_ids),
+                     "version_id": get_hash(imgs),
+                     # "runtime_count": replicas_sum
+                    })
 
     desc["monitoring"] = mon_data
 
@@ -539,7 +538,7 @@ def test_dep_progress(dep):
 # ? do we need to use --to-revision with the undo command?
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
-def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress = 40):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 5 # time to wait for object update ('observedGeneration')
     # wait_for_progress = 40 # time to wait for rollout to complete
@@ -547,7 +546,6 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     part = 1.0/float(t)
     m = "updating {}".format(obj)
 
- #FIXME FIXME: configurable timeout
     dbg_log('waiting for update: deployment {}, generation {}'.format(obj, patch_gen))
 
     # NOTE: best to implement this with a 'watch', not using an API poll!
@@ -619,9 +617,6 @@ def update(appname, desc, data, print_progress):
     # FIXME: NB: app-wide settings not supported
 
     cfg = data.get("control", {})
-    # TODO: new item: cfg.get("on_fail", "keep") # valid: keep, rollback, destroy
-    # TODO: new item: cfg.get("settlement", 0)
-    # TODO: new item: cfg.get("userdataa", {}).get("deployment", None) # ref app name
 
     # FIXME: off-spec; step-down in data if a 'state' key is provided at the top.
     if 'state' in data:
@@ -682,7 +677,7 @@ def update(appname, desc, data, print_progress):
         # Settings and env vars
         for name, value in settings.items():
             value = _value(value) # compatibility: allow a scalar, but also work with {"value": {anything}}
-            cont_patch = patches.setdefault(cont_name,{})
+            cont_patch = patches.setdefault(cont_name, {})
             if name in ("mem", "cpu"):
                 set_rsrc(cont_patch, name, value)
                 continue
