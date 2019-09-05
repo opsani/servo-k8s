@@ -159,9 +159,9 @@ def read_desc():
     comps = desc['application']['components']
     replicas_tracker = {}
     for name, comp in comps.items():
-        settings = (comp.get('settings') or {})
+        settings = comp.get('settings', {})
         if 'replicas' in settings:
-            dep_name = name.split('/')[0] if '/' in name else name
+            dep_name = name.split('/')[0] # if no '/', this just gets the whole name
             replicas_tracker.setdefault(dep_name, 0)
             replicas_tracker[dep_name] += 1
 
@@ -319,6 +319,15 @@ def raw_query(appname, desc):
         else:
             cont = conts[0]
 
+        # skip if excluded by label
+        try:
+            if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
+                continue
+        except ValueError as e: # int() is the only thing that should trigger exceptions here
+            #TODO add warning to annotations to be returned
+            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dep_name, type(e).__name__, str(e)), file=sys.stderr)
+            # pass # fall through, ignore unparseable label
+
         # selector for pods, NOTE this relies on having a equality-based label selector,
         # k8s seems to support other types, I don't know what's being used in practice.
         try:
@@ -329,15 +338,6 @@ def raw_query(appname, desc):
                 status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
         # convert to string suitable for 'kubect -l labelsel'
         sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
-
-        # skip if excluded by label
-        try:
-            if bool(int(dep["metadata"].get("labels", {}).get(EXCLUDE_LABEL, "0"))): # string value of 1 (non-0)
-                continue
-        except ValueError as e: # int() is the only thing that should trigger exceptions here
-            #TODO add warning to annotations to be returned
-            print("failed to parse exclude label for deployment {}: {}: {}; ignored".format(dep_name, type(e).__name__, str(e)), file=sys.stderr)
-            # pass # fall through, ignore unparseable label
 
         # list of pods, for runtime_id
         pods = k_get(appname, ["-l", sel, "pods"])
