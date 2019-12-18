@@ -3,7 +3,7 @@ from helpers import setup_deployment, cleanup_deployment, query_dep, adjust_dep
 
 def test_query_env_var_setting():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-env-var-setting
@@ -44,7 +44,7 @@ def test_query_env_var_setting():
 
 def test_query_env_var_setting_with_default_value():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-env-var-setting-with-default-value
@@ -83,7 +83,7 @@ def test_query_env_var_setting_with_default_value():
 
 def test_adjust_env_var_setting():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-env-var-setting
