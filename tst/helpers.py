@@ -84,14 +84,17 @@ def copy_driver_files(tmpdirname, cfg):
     shutil.copyfile(adjust_src, adjust_dst, follow_symlinks=True)
     # Create encoders folder
     os.mkdir(os.path.join(tmpdirname, 'encoders'))
-    # Copy encoders/base.py
-    base_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'encoders', 'base.py'))
-    base_dst = os.path.join(tmpdirname, 'encoders', 'base.py')
-    shutil.copyfile(base_src, base_dst, follow_symlinks=True)
-    # Copy encoders/base.py
-    jvm_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'encoders', 'jvm.py'))
-    jvm_dst = os.path.join(tmpdirname, 'encoders', 'jvm.py')
-    shutil.copyfile(jvm_src, jvm_dst, follow_symlinks=True)
+    try:
+        # Copy encoders/base.py
+        base_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'encoders', 'base.py'))
+        base_dst = os.path.join(tmpdirname, 'encoders', 'base.py')
+        shutil.copyfile(base_src, base_dst, follow_symlinks=True)
+        # Copy encoders/base.py
+        jvm_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'encoders', 'jvm.py'))
+        jvm_dst = os.path.join(tmpdirname, 'encoders', 'jvm.py')
+        shutil.copyfile(jvm_src, jvm_dst, follow_symlinks=True)
+    except:
+        pass
     # Copy adjust
     adjust_drv_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'adjust'))
     adjust_drv_dst = os.path.join(tmpdirname, 'adjust')
@@ -107,6 +110,8 @@ def run_driver(params, input=None):
     cmd = './adjust {}'.format(params)
     proc = subprocess.run(cmd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
     assert proc.stdout
+    # Driver output debug
+    # print(proc.stdout)
     stdout = json.loads(str(proc.stdout.strip(), encoding='utf-8').split('\n')[-1])
     return stdout, str(proc.stderr, encoding='utf-8'), proc.returncode
 
