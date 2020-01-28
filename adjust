@@ -144,10 +144,14 @@ def read_desc():
 
     refer_tip = 'You can refer to a sample configuration in README.md.'
     assert bool(desc), 'Configuration file is empty.'
-    assert 'k8s' in desc and desc['k8s'], 'No configuration were defined for K8s driver in config file {}. ' \
-                                          'Please set up configuration for deployments under key "k8s". ' \
-                                          '{}'.format(DESC_FILE, refer_tip)
-    desc = desc['k8s']
+    driver_key = 'k8s'
+    if os.environ.get('OPTUNE_USE_DRIVER_NAME', False):
+        driver_key = os.path.basename(__file__)
+    assert driver_key in desc and desc[driver_key], 'No configuration were defined for K8s driver in config file {}. ' \
+                                          'Please set up configuration for deployments under key "{}". ' \
+                                          '{}'.format(
+                                              DESC_FILE, refer_tip, driver_key)
+    desc = desc[driver_key]
 
     assert 'application' in desc and desc['application'], \
         'Section "application" was not defined in a configuration file. {}'.format(refer_tip)
