@@ -610,6 +610,18 @@ def _value(x):
 
 
 def update(appname, desc, data, print_progress):
+
+    adjust_on = desc.get("adjust_on", False)
+
+    if adjust_on:
+        try:
+            should_adjust = eval(adjust_on, {'__builtins__': None}, {"data": data})
+        except:
+            should_adjust = False
+        if not should_adjust:
+            return {"status": "ok", "reason": "Skipped due to 'adjust_on' condition"}
+
+
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, desc)
