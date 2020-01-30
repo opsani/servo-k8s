@@ -597,9 +597,9 @@ resource_paths = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
 def set_rsrc(cp, sn, sv):
     r1, r2 = resource_paths[sn]
     if sn == "mem":
-        sv = str(sv) + 'Gi'     # internal memory representation is in GiB
+        sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
     else:
-        sv = str(sv)
+        sv = str(round(sv,3))
     cp.setdefault("resources", {}).setdefault(r1, {})[r2] = sv
 
 
