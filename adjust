@@ -144,10 +144,14 @@ def read_desc():
 
     refer_tip = 'You can refer to a sample configuration in README.md.'
     assert bool(desc), 'Configuration file is empty.'
-    assert 'k8s' in desc and desc['k8s'], 'No configuration were defined for K8s driver in config file {}. ' \
-                                          'Please set up configuration for deployments under key "k8s". ' \
-                                          '{}'.format(DESC_FILE, refer_tip)
-    desc = desc['k8s']
+    driver_key = 'k8s'
+    if os.environ.get('OPTUNE_USE_DRIVER_NAME', False):
+        driver_key = os.path.basename(__file__)
+    assert driver_key in desc and desc[driver_key], 'No configuration were defined for K8s driver in config file {}. ' \
+                                          'Please set up configuration for deployments under key "{}". ' \
+                                          '{}'.format(
+                                              DESC_FILE, refer_tip, driver_key)
+    desc = desc[driver_key]
 
     assert 'application' in desc and desc['application'], \
         'Section "application" was not defined in a configuration file. {}'.format(refer_tip)
@@ -593,9 +597,9 @@ resource_paths = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
 def set_rsrc(cp, sn, sv):
     r1, r2 = resource_paths[sn]
     if sn == "mem":
-        sv = str(sv) + 'Gi'     # internal memory representation is in GiB
+        sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
     else:
-        sv = str(sv)
+        sv = str(round(sv,3))
     cp.setdefault("resources", {}).setdefault(r1, {})[r2] = sv
 
 
@@ -606,6 +610,18 @@ def _value(x):
 
 
 def update(appname, desc, data, print_progress):
+
+    adjust_on = desc.get("adjust_on", False)
+
+    if adjust_on:
+        try:
+            should_adjust = eval(adjust_on, {'__builtins__': None}, {"data": data})
+        except:
+            should_adjust = False
+        if not should_adjust:
+            return {"status": "ok", "reason": "Skipped due to 'adjust_on' condition"}
+
+
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, desc)
