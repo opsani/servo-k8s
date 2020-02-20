@@ -176,9 +176,12 @@ def read_desc():
 
     return desc
 
-def numval(v, minv, maxv, step=1.0):
+def numval(v, minv, maxv, step=1.0, pinn=None):
     """shortcut for creating linear setting descriptions"""
-    return {"value":v, "min":minv, "max":maxv, "step":step, "type":"range"}
+    ret = {"value":v, "min":minv, "max":maxv, "step":step, "type":"range"}
+    if pinn is not None:
+        ret["pinned"] = pinn == True
+    return ret
 
 def cpuunits(s):
     '''convert a string for CPU resource (with optional unit suffix) into a number'''
@@ -371,13 +374,15 @@ def raw_query(appname, desc):
                 settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
                                          minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
                                          maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
-                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi))
+                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
+                                         pinn=(settings.get('mem') or {}).get('pinned', None))
             if read_cpu:
                 # (value, min, max, step), all in CPU cores
                 settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
                                          minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
                                          maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
-                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP))
+                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP),
+                                         pinn=(settings.get('cpu') or {}).get('pinned', None))
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
@@ -385,7 +390,8 @@ def raw_query(appname, desc):
             settings["replicas"] = numval(v=replicas,
                                           minv=(settings.get('replicas') or {}).get('min', replicas),
                                           maxv=(settings.get('replicas') or {}).get('max', replicas),
-                                          step=(settings.get('replicas') or {}).get('step', 1))
+                                          step=(settings.get('replicas') or {}).get('step', 1),
+                                          pinn=(settings.get('replicas') or {}).get('pinned', None))
 
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get("env", [])
