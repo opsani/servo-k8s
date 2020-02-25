@@ -144,10 +144,14 @@ def read_desc():
 
     refer_tip = 'You can refer to a sample configuration in README.md.'
     assert bool(desc), 'Configuration file is empty.'
-    assert 'k8s' in desc and desc['k8s'], 'No configuration were defined for K8s driver in config file {}. ' \
-                                          'Please set up configuration for deployments under key "k8s". ' \
-                                          '{}'.format(DESC_FILE, refer_tip)
-    desc = desc['k8s']
+    driver_key = 'k8s'
+    if os.environ.get('OPTUNE_USE_DRIVER_NAME', False):
+        driver_key = os.path.basename(__file__)
+    assert driver_key in desc and desc[driver_key], 'No configuration were defined for K8s driver in config file {}. ' \
+                                          'Please set up configuration for deployments under key "{}". ' \
+                                          '{}'.format(
+                                              DESC_FILE, refer_tip, driver_key)
+    desc = desc[driver_key]
 
     assert 'application' in desc and desc['application'], \
         'Section "application" was not defined in a configuration file. {}'.format(refer_tip)
@@ -172,9 +176,12 @@ def read_desc():
 
     return desc
 
-def numval(v, minv, maxv, step=1.0):
+def numval(v, minv, maxv, step=1.0, pinn=None):
     """shortcut for creating linear setting descriptions"""
-    return {"value":v, "min":minv, "max":maxv, "step":step, "type":"range"}
+    ret = {"value":v, "min":minv, "max":maxv, "step":step, "type":"range"}
+    if pinn is not None:
+        ret["pinned"] = pinn == True
+    return ret
 
 def cpuunits(s):
     '''convert a string for CPU resource (with optional unit suffix) into a number'''
@@ -367,13 +374,15 @@ def raw_query(appname, desc):
                 settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
                                          minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
                                          maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
-                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi))
+                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
+                                         pinn=(settings.get('mem') or {}).get('pinned', None))
             if read_cpu:
                 # (value, min, max, step), all in CPU cores
                 settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
                                          minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
                                          maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
-                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP))
+                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP),
+                                         pinn=(settings.get('cpu') or {}).get('pinned', None))
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
@@ -381,7 +390,8 @@ def raw_query(appname, desc):
             settings["replicas"] = numval(v=replicas,
                                           minv=(settings.get('replicas') or {}).get('min', replicas),
                                           maxv=(settings.get('replicas') or {}).get('max', replicas),
-                                          step=(settings.get('replicas') or {}).get('step', 1))
+                                          step=(settings.get('replicas') or {}).get('step', 1),
+                                          pinn=(settings.get('replicas') or {}).get('pinned', None))
 
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get("env", [])
@@ -593,9 +603,9 @@ resource_paths = {"mem":("requests", "limits", "memory"), "cpu":("requests", "li
 def set_rsrc(cp, sn, sv):
     r1, r2, r3 = resource_paths[sn]
     if sn == "mem":
-        sv = str(sv) + 'Gi'     # internal memory representation is in GiB
+        sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
     else:
-        sv = str(sv)
+        sv = str(round(sv,3))
     cp.setdefault("resources", {}).setdefault(r1, {})[r3] = sv
     cp.setdefault("resources", {}).setdefault(r2, {})[r3] = sv
 
@@ -607,6 +617,18 @@ def _value(x):
 
 
 def update(appname, desc, data, print_progress):
+
+    adjust_on = desc.get("adjust_on", False)
+
+    if adjust_on:
+        try:
+            should_adjust = eval(adjust_on, {'__builtins__': None}, {"data": data})
+        except:
+            should_adjust = False
+        if not should_adjust:
+            return {"status": "ok", "reason": "Skipped due to 'adjust_on' condition"}
+
+
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
     _, raw = raw_query(appname, desc)
