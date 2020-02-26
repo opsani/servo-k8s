@@ -48,11 +48,13 @@ def setcfg(fname):
 
 def run(cmd):
     """basic execution of a command, stdout and stderr are not redirected (end up in py.test logs), raise exception on errors"""
-    subprocess.run(cmd, shell=True, check=True)
+    # nosec below as test suite is not intended to run in production environment, invocations all use static input
+    subprocess.run(cmd, shell=True, check=True) # nosec
 
 def silent(cmd):
     """run a command and ignore stdout/stderr and non-zero exit status"""
-    subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    # nosec below as test suite is not intended to run in production environment, invocations all use static input
+    subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False) # nosec
 
 # === 
 import shutil
@@ -63,14 +65,16 @@ import yaml
 def setup_deployment(dep):
     cleanup_deployment(dep)
     cmd = 'kubectl create -f -'
-    subprocess.run(cmd, input=bytearray(dep.encode('utf-8')), shell=True, check=True,
+    # nosec below as test suite is not intended to run in production environment, invocations all use static input
+    subprocess.run(cmd, input=bytearray(dep.encode('utf-8')), shell=True, check=True, # nosec
                    stdout=subprocess.DEVNULL)
 
 
 def cleanup_deployment(dep):
-    dep = yaml.load(dep)
+    dep = yaml.safe_load(dep)
     cmd = 'kubectl delete deployment {dep}'.format(dep=dep['metadata']['name'])
-    proc = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    # nosec below as test suite is not intended to run in production environment, invocations all use static input
+    proc = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) # nosec
     if proc.stderr and 'not found' in str(proc.stderr, encoding='utf-8'):
         return
     proc.check_returncode()
@@ -105,7 +109,8 @@ def copy_driver_files(tmpdirname, cfg):
 
 def run_driver(params, input=None):
     cmd = './adjust {}'.format(params)
-    proc = subprocess.run(cmd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True)
+    # nosec below as test suite is not intended to run in production environment, invocations all use static input
+    proc = subprocess.run(cmd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True) # nosec
     assert proc.stdout
     stdout = json.loads(str(proc.stdout.strip(), encoding='utf-8').split('\n')[-1])
     return stdout, str(proc.stderr, encoding='utf-8'), proc.returncode
