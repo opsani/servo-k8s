@@ -3,7 +3,7 @@ from helpers import setup_deployment, cleanup_deployment, query_dep, adjust_dep
 
 def test_query_default_container():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-default-container
@@ -50,7 +50,7 @@ def test_query_default_container():
 
 def test_adjust_default_container():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-default-container
@@ -99,7 +99,7 @@ def test_adjust_default_container():
 
 def test_query_specific_container():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-specific-container
@@ -146,7 +146,7 @@ def test_query_specific_container():
 
 def test_adjust_specific_container():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-specific-container

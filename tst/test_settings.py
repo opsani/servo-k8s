@@ -5,7 +5,7 @@ from helpers import setup_deployment, cleanup_deployment, query_dep, adjust_dep
 
 def test_query_settings_cpu():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-settings-cpu
@@ -45,7 +45,7 @@ def test_query_settings_cpu():
 
 def test_query_settings_mem():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-settings-mem
@@ -85,7 +85,7 @@ def test_query_settings_mem():
 
 def test_query_settings_replicas():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-query-settings-replicas
@@ -123,7 +123,7 @@ def test_query_settings_replicas():
 
 def test_adjust_settings_cpu():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-settings-cpu
@@ -164,7 +164,7 @@ def test_adjust_settings_cpu():
 
 def test_adjust_settings_mem():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-settings-mem
@@ -206,7 +206,7 @@ def test_adjust_settings_mem():
 
 def test_adjust_settings_replicas():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-adjust-settings-replicas

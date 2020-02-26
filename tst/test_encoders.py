@@ -3,7 +3,7 @@ from helpers import setup_deployment, cleanup_deployment, query_dep, adjust_dep
 
 def test_encoder_query_env_var():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-query-env-var
@@ -47,7 +47,7 @@ def test_encoder_query_env_var():
 
 def test_encoder_adjust_env_var():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-adjust-env-var
@@ -93,7 +93,7 @@ def test_encoder_adjust_env_var():
 
 def test_encoder_query_command():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-query-command
@@ -139,7 +139,7 @@ def test_encoder_query_command():
 
 def test_encoder_adjust_command():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-adjust-command
@@ -187,7 +187,7 @@ def test_encoder_adjust_command():
 
 def test_encoder_query_with_setting_prefix():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-query-with-setting-prefix
@@ -250,7 +250,7 @@ def test_encoder_query_with_setting_prefix():
 
 def test_encoder_adjust_with_setting_prefix():
     dep = """
-    apiVersion: extensions/v1beta1
+    apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: test-encoder-adjust-with-setting-prefix

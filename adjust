@@ -395,7 +395,7 @@ def raw_query(appname, desc):
 
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get("env", [])
-        cont_env_dict = {i['name']: i['value'] for i in cont_env_list}
+        cont_env_dict = {i['name']: i['value'] for i in cont_env_list if set(i.keys()) - set(['name', 'value']) == set() }
 
         env = comp.get('env')
         if env:
@@ -598,15 +598,16 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
 
 
-resource_paths = {"mem":("limits", "memory"), "cpu":("limits", "cpu")}
+resource_paths = {"mem":("requests", "limits", "memory"), "cpu":("requests", "limits", "cpu")}
 
 def set_rsrc(cp, sn, sv):
-    r1, r2 = resource_paths[sn]
+    r1, r2, r3 = resource_paths[sn]
     if sn == "mem":
         sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
     else:
         sv = str(round(sv,3))
-    cp.setdefault("resources", {}).setdefault(r1, {})[r2] = sv
+    cp.setdefault("resources", {}).setdefault(r1, {})[r3] = sv
+    cp.setdefault("resources", {}).setdefault(r2, {})[r3] = sv
 
 
 def _value(x):
