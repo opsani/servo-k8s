@@ -31,16 +31,7 @@ and memory resources of the target container (NOTE: the container resource reque
 value as the limits). These settings should be specified under the `settings` key for
 each desired deployment (see the example below). Additionally, `cpu`, `mem`, and `replicas` settings support pinning
 which exempts them from being adjusted by the backend while still reporting their values for the
-purpose of measurement. Use the following syntax to mark a setting as pinned:
-
-```yaml
-...
-    cpu:
-        pinned: True
-    mem:
-        pineed: True
-...
-```
+purpose of measurement.
 
 You can also tune arbitrary environment variables by defining them in a section `env` which is on the same
 level as section `settings` as can be seen in the example below. For environment variables we support
@@ -65,7 +56,7 @@ Example `config.yaml` configuration file:
     k8s:
        application:
           components:
-             nginx/frontend:
+            nginx/frontend:
                 settings:
                     cpu:
                         min: .1
@@ -86,6 +77,12 @@ Example `config.yaml` configuration file:
                       max: 100
                       step: 1
                       default: 20
+            nginx/backend:
+                settings:
+                    cpu:
+                        pinned: True # Optional
+                    mem:
+                        pinned: True # Optional
 ```
 
 To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If you include the driver in the
