@@ -91,6 +91,9 @@ rules:
 - apiGroups: [""] # "" indicates the core API group
   resources: ["deployments"]
   verbs: ["get", "patch"]
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get"]
 ```
 
 ## Running the tests
