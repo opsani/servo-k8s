@@ -827,7 +827,8 @@ class K8sAdjust(Adjust):
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         desc.pop("driver", None)
-        r = query(self.app_id, desc)
+        namespace = os.environ.get('OPTUNE_NAMESPACE', desc.get('namespace', self.app_id))
+        r = query(namespace, desc)
         return r
 
     def adjust(self, data):
@@ -836,7 +837,8 @@ class K8sAdjust(Adjust):
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
         # all other exceptions: default handler - stack trace and sys.exit(1)
-        r = update(self.app_id, desc, data, self._progress)
+        namespace = os.environ.get('OPTUNE_NAMESPACE', desc.get('namespace', self.app_id))
+        r = update(namespace, desc, data, self._progress)
         return r
 
 
