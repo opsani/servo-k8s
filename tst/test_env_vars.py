@@ -23,6 +23,10 @@ def test_query_env_var_setting():
               env:
                 - name: ANYTHING
                   value: everything
+                - name: NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
     """
     cfg = """
     k8s:
@@ -61,6 +65,11 @@ def test_query_env_var_setting_with_default_value():
             - name: main
               image: alpine:latest
               command: ["/bin/sh", "-c", "sleep 3600"]
+              env:
+                - name: NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
     """
     cfg = """
     k8s:
@@ -103,6 +112,10 @@ def test_adjust_env_var_setting():
               env:
                 - name: ANYTHING
                   value: everything
+                - name: NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
     """
     cfg = """
     k8s:
