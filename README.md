@@ -59,7 +59,7 @@ Example `config.yaml` configuration file:
 
 ```yaml
     k8s:
-        adjust_on: data["control"]["userdata"]["deploy_to"] == "canary"
+        adjust_on: data["control"]["userdata"]["deploy_to"] == "canary" # Optional, if specified will adjust only if expression is true
         application:
             components:
                 nginx/frontend:
