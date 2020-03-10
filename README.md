@@ -50,48 +50,49 @@ variable. The `default` value will be used at the time of a first adjustment in 
 Only environment variables with a key `value` are supported. We do not support environment variables that
 have `valueFrom` value-defining property. Those without `value` should not be listed in section `env`.
 
-Example `config.yaml` configuration file:
-
-```yaml
-    k8s:
-       application:
-          components:
-            nginx/frontend:
-                settings:
-                    cpu:
-                        min: .1
-                        max: 2
-                        step: .1
-                    mem:
-                        min: .5
-                        max: 8
-                        step: .1
-                    replicas:
-                        min: 3
-                        max: 15
-                        step: 1
-                env:
-                   COMMIT_DELAY:
-                      type: range
-                      min: 1
-                      max: 100
-                      step: 1
-                      default: 20
-            nginx/backend:
-                settings:
-                    cpu:
-                        pinned: True # Optional
-                    mem:
-                        pinned: True # Optional
-```
-
-To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If you include the driver in the
-application namespace, please make sure you define this label in driver's Deployment object.
-
 The configuration may also define an `adjust_on` clause at the same level as the section `application`. When specified
 `adjust_on` should define a python statement to be used as a condition for enabling adjustment. This statement has access
 to the adjustment input in the form of a dictionary named `data`. When the condition evaluates to false, all k8s adjustment
 will be skipped for that adjustment iteration
+
+Example `config.yaml` configuration file:
+
+```yaml
+    k8s:
+        adjust_on: data["control"]["userdata"]["deploy_to"] == "canary"
+        application:
+            components:
+                nginx/frontend:
+                    settings:
+                        cpu:
+                            min: .1
+                            max: 2
+                            step: .1
+                        mem:
+                            min: .5
+                            max: 8
+                            step: .1
+                        replicas:
+                            min: 3
+                            max: 15
+                            step: 1
+                    env:
+                        COMMIT_DELAY:
+                            type: range
+                            min: 1
+                            max: 100
+                            step: 1
+                            default: 20
+                nginx/backend:
+                    settings:
+                        cpu:
+                            pinned: True # Optional
+                        mem:
+                            pinned: True # Optional
+```
+
+To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If you include the driver in the
+application namespace, please make sure you define this label in driver's Deployment object.
 
 Limitations:
 
