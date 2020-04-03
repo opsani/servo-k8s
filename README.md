@@ -103,6 +103,23 @@ If `replicas` is set for multi-container deployment and the values are different
 the resulting adjustment becomes unpredictable. Please, define only one `replicas` setting
 per component-deployment.
 
+## Required Permissions
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: <TARGET_NAMESPACE>
+  name: <ROLE_NAME>
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["deployments"]
+  verbs: ["get", "patch"]
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get"]
+```
+
 ## Running the tests
 
 The tests are meant to be run by `pytest`. The Python3 version is required, it can be installed with
