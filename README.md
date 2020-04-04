@@ -3,12 +3,24 @@
 Optune servo driver for Kubernetes (native)
 
 This driver supports an application deployed on K8s, as a number of **Deployment** objects,
-and optionally specific **Containers**, in a single namespace. The namespace name is the application
-name and all **Deployment** objects in that namespace are considered part of the application.
+and optionally specific **Containers**, in a single namespace. The namespace name is derived
+in one of the following ways:
 
-> If the `OPTUNE_USE_DEFAULT_NAMESPACE` environment variable is set, the driver uses the default
-namespace rather than the application name. This is useful when the driver runs in a deployment
+- If the `OPTUNE_USE_DEFAULT_NAMESPACE` environment variable is set, the driver uses the default
+namespace. This is useful when the driver runs in a deployment
 in the same namespace as the application (i.e., the servo is embedded in the application).
+
+- If the `OPTUNE_NAMESPACE` environment variable is set, the driver uses the value of said
+variable as the namespace.
+
+- If the config (see below) defines a `namespace`, the value defined there will be used
+
+- If none of the above are defined, the `app_id` argument passed into the servo will be used
+as the namespace
+
+The precedence of namespace configuration is as follows: `OPTUNE_USE_DEFAULT_NAMESPACE` >
+`OPTUNE_NAMESPACE` > configured `namespace` > servo `app_id`. (eg. if `OPTUNE_NAMESPACE` is
+set but `OPTUNE_USE_DEFAULT_NAMESPACE` is truthy, the default namespace will be used)
 
 This driver requires the `adjust.py` module from `git@github.com:opsani/servo.git`.
 Place a copy of the file in the same directory as the `adjust` executable found here.
