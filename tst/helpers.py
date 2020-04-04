@@ -126,8 +126,10 @@ def query_dep(cfg):
         copy_driver_files(dirname, cfg)
         prevcwd = os.getcwd()
         os.chdir(dirname)
-        result, _, _ = run_driver('--query default')
-        os.chdir(prevcwd)
+        try:
+            result, _, _ = run_driver('--query default')
+        finally:
+            os.chdir(prevcwd)
         return result
 
 
@@ -136,9 +138,11 @@ def adjust_dep(cfg, driver_input):
         copy_driver_files(dirname, cfg)
         prevcwd = os.getcwd()
         os.chdir(dirname)
-        result, stderr, retcode = run_driver('default', input=bytearray(json.dumps(driver_input).encode('utf-8')))
-        assert result.get('status') == 'ok', \
-            'Error running ./adjust default.\nGot on stdout: {}\n' \
-            'Got on stderr: {}\nReturn code: {}'.format(result, stderr, retcode)
-        os.chdir(prevcwd)
+        try:
+            result, stderr, retcode = run_driver('default', input=bytearray(json.dumps(driver_input).encode('utf-8')))
+            assert result.get('status') == 'ok', \
+                'Error running ./adjust default.\nGot on stdout: {}\n' \
+                'Got on stderr: {}\nReturn code: {}'.format(result, stderr, retcode)
+        finally:
+            os.chdir(prevcwd)
         return result

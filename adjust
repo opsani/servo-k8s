@@ -395,7 +395,8 @@ def raw_query(appname, desc):
 
         # current settings of custom env vars (NB: type conv needed for numeric values!)
         cont_env_list = cont.get("env", [])
-        cont_env_dict = {i['name']: i['value'] for i in cont_env_list if set(i.keys()) - set(['name', 'value']) == set() }
+        # include only vars for which the keys 'name' and 'value' are defined
+        cont_env_dict = {i['name']: i['value'] for i in cont_env_list if 'name' in i and 'value' in i}
 
         env = comp.get('env')
         if env:
