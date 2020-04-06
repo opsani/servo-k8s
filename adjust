@@ -636,10 +636,10 @@ def set_rsrc(cp, sn, sv, sel='both'):
 
     if sel == 'request':
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
-        cp["resources"].setdefault("limits", {}).pop(rn, None) # Remove corresponding limit if exists
+        cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
     elif sel == 'limit':
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
-        cp["resources"].setdefault("requests", {}).pop(rn, None) # Remove corresponding request if exists
+        cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
     else: # both
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
