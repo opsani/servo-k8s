@@ -79,6 +79,16 @@ def cleanup_deployment(dep):
         return
     proc.check_returncode()
 
+def k_get(qry):
+    """run kubectl get and return parsed json output"""
+    if not isinstance(qry, list):
+        qry = [qry]
+    # this will raise exception if it fails:
+    output = subprocess.check_output(['kubectl', 'get', '--output=json'] + qry)
+    output = output.decode('utf-8')
+    output = json.loads(output)
+    return output
+
 
 def copy_driver_files(tmpdirname, cfg):
     curpath = os.path.dirname(os.path.abspath(__file__))
@@ -113,7 +123,10 @@ def copy_driver_files(tmpdirname, cfg):
 def run_driver(params, input=None):
     cmd = './adjust {}'.format(params)
     # nosec below as test suite is not intended to run in production environment, invocations all use static input
-    proc = subprocess.run(cmd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True) # nosec
+    try:
+        proc = subprocess.run(cmd, input=input, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, check=True) # nosec
+    except subprocess.CalledProcessError as cpe:
+        raise Exception('Command "{}" returned exit status {} \n\nSTDOUT: {}\n\nSTDERR: {}'.format(cmd, cpe.returncode, cpe.stdout, cpe.stderr))
     assert proc.stdout
     # Driver output debug
     # print(proc.stdout)
