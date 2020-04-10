@@ -317,9 +317,10 @@ def raw_query(appname, desc):
         replicas_sum = sum((c["settings"]["replicas"]["value"] for c in refqry["application"]["components"].values()))
         refqry = refqry["monitoring"] # we don't need other data from refqry any more
         mon_data = {"ref_spec_id": refqry["spec_id"],
-                    "ref_runtime_id": refqry["runtime_id"],
                     "ref_version_id": refqry["version_id"],
                     "ref_runtime_count": replicas_sum}
+        if refqry.get("runtime_id"):
+            mon_data["ref_runtime_id"] = refqry["runtime_id"]
 
     deployments = k_get(appname, DEPLOYMENT)
     # note d["Kind"] should be "List"
@@ -374,9 +375,12 @@ def raw_query(appname, desc):
         sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
 
         # list of pods, for runtime_id
-        pods = k_get(appname, ["-l", sel, "pods"])
-        pods = pods["items"]
-        runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+        try:
+            pods = k_get(appname, ["-l", sel, "pods"])
+            pods = pods["items"]
+            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+        except subprocess.CalledProcessError as e:
+            Adjust.print_json_error(error="warning", cl="CalledProcessError", message='Unable to retrieve pods: {}. Output: {}'.format(e, e.output))
 
         # extract deployment settings
         # NOTE: generation, resourceVersion and uid can help detect changes
@@ -463,9 +467,8 @@ def raw_query(appname, desc):
             del comp['command']
 
 
-    if not runtime_ids:
-        raise AdjustError("application '{}' has no components".format(appname),
-                          status="aborted", reason="app-unavailable") # NOTE not a documented 'reason'
+    if runtime_ids:
+        mon_data['runtime_id'] = get_hash(runtime_ids)
 
     # app state data
     # (NOTE we strip the component names because our (single-component) 'reference' app will necessarily have a different component name)
@@ -473,7 +476,6 @@ def raw_query(appname, desc):
     raw_specs = [raw_specs[k] for k in sorted(raw_specs.keys())]
     imgs = [imgs[k] for k in sorted(imgs.keys())]
     mon_data.update({"spec_id": get_hash(raw_specs),
-                     "runtime_id": get_hash(runtime_ids),
                      "version_id": get_hash(imgs),
                      # "runtime_count": replicas_sum
                     })
