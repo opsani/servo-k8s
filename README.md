@@ -38,10 +38,11 @@ that you want to optimize in your cluster. In case you specify just `deploymentN
 component, only the first container from a list of containers from a result of a command
 `kubectl get deployment/deploymentName -o json` will be used.
 
-The driver supports tuning of the number of replicas for the deployment as well as the limits for the CPU
-and memory resources of the target container (NOTE: the container resource requests will also be tuned to the same
-value as the limits). These settings should be specified under the `settings` key for
-each desired deployment (see the example below). Additionally, `cpu`, `mem`, and `replicas` settings support pinning
+The driver supports tuning of the number of replicas for the deployment as well as the limits and requests for the CPU
+and memory resources of the target container. These settings should be specified under the `settings` key for
+each desired deployment (see the example below). By default, the container resource requests and limits are both tuned to the same
+value. To modify this behaviour, include a `selector` with a value of `request` or `limit`, to exclusively tune the value for `requests`
+or `limits` respectively. Additionally, `cpu`, `mem`, and `replicas` settings support pinning
 which exempts them from being adjusted by the backend while still reporting their values for the
 purpose of measurement.
 
@@ -77,13 +78,14 @@ Example `config.yaml` configuration file:
                 nginx/frontend:
                     settings:
                         cpu:
-                            min: .1
+                            min: .125
                             max: 2
-                            step: .1
+                            step: .125
                         mem:
                             min: .5
                             max: 8
-                            step: .1
+                            step: .125
+                            selector: request
                         replicas:
                             min: 3
                             max: 15

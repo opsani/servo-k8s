@@ -23,8 +23,8 @@ json_enc = json.JSONEncoder(separators=(",", ":")).encode
 DESC_FILE = "./config.yaml"
 EXCLUDE_LABEL = 'optune.ai/exclude'
 Gi = 1024 * 1024 * 1024
-MEM_STEP = 64 * 1024 * 1024  # minimal useful increment in mem limit/reserve, bytes
-CPU_STEP = 0.01  # 1% of a core (even though 1 millicore is the highest resolution supported by k8s)
+MEM_STEP = 128 * 1024 * 1024  # minimal useful increment in mem limit/reserve, bytes
+CPU_STEP = 0.0125  # 1.25% of a core (even though 1 millicore is the highest resolution supported by k8s)
 MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
 MAX_CPU = 4.0  # cores
 # MAX_REPLICAS = 1000 # arbitrary, TBD
@@ -32,6 +32,7 @@ MAX_CPU = 4.0  # cores
 # the k8s obj to which we make queries/updates:
 DEPLOYMENT = "deployment"
 # DEPLOYMENT = "deployment.v1.apps"  # new, not supported in 1.8 (it has v1beta1)
+RESOURCE_MAP = {"mem": "memory", "cpu": "cpu"}
 
 
 class ConfigError(Exception): # user-provided descriptor not readable
@@ -254,6 +255,32 @@ def isenumsetting(s):
 def issetting(s):
     return isinstance(s, dict) and (israngesetting(s) or isenumsetting(s))
 
+def get_rsrc(desc_settings, cont_resources, sn):
+    rn = RESOURCE_MAP[sn]
+    selector = desc_settings.get(sn, {}).get('selector', 'both')
+    if selector == 'request':
+        val = cont_resources.get("requests", {}).get(rn)
+        if val is None:
+            val = cont_resources.get("limits", {}).get(rn)
+            if val is not None:
+                Adjust.print_json_error(
+                    error='warning', cl=None, 
+                    message='Using the non-selected value "limit" for resource "{}" as the selected value is not set'.format(sn))
+            else:
+                val = "0"
+    else:
+        val = cont_resources.get("limits", {}).get(rn)
+        if val is None:
+            val = cont_resources.get("requests", {}).get(rn)
+            if val is not None:
+                if selector == 'limit':
+                    Adjust.print_json_error(
+                        error='warning', cl=None, 
+                        message='Using the non-selected value "request" for resource "{}" as the selected value is not set'.format(sn))
+                # else: don't print warning for 'both'
+            else:
+                val = "0"
+    return val
 
 def raw_query(appname, desc):
     """
@@ -370,15 +397,17 @@ def raw_query(appname, desc):
         res = cont.get("resources")
         if res:
             if read_mem:
+                mem_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='mem')
                 # (value, min, max, step) all in GiB
-                settings["mem"] = numval(v=memunits(res.get("limits", {}).get("memory", "0")) / Gi,
+                settings["mem"] = numval(v=memunits(mem_val) / Gi,
                                          minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
                                          maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
                                          step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
                                          pinn=(settings.get('mem') or {}).get('pinned', None))
             if read_cpu:
+                cpu_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='cpu')
                 # (value, min, max, step), all in CPU cores
-                settings["cpu"] = numval(v=cpuunits(res.get("limits", {}).get("cpu", "0")),
+                settings["cpu"] = numval(v=cpuunits(cpu_val),
                                          minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
                                          maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
                                          step=(settings.get('cpu') or {}).get('step', CPU_STEP),
@@ -598,17 +627,22 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     # loop ended, timed out:
     raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
 
-
-resource_paths = {"mem":("requests", "limits", "memory"), "cpu":("requests", "limits", "cpu")}
-
-def set_rsrc(cp, sn, sv):
-    r1, r2, r3 = resource_paths[sn]
+def set_rsrc(cp, sn, sv, sel='both'):
+    rn = RESOURCE_MAP[sn]
     if sn == "mem":
         sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
     else:
         sv = str(round(sv,3))
-    cp.setdefault("resources", {}).setdefault(r1, {})[r3] = sv
-    cp.setdefault("resources", {}).setdefault(r2, {})[r3] = sv
+
+    if sel == 'request':
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
+        cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
+    elif sel == 'limit':
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
+        cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
+    else: # both
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
 
 
 def _value(x):
@@ -703,7 +737,7 @@ def update(appname, desc, data, print_progress):
             value = _value(value) # compatibility: allow a scalar, but also work with {"value": {anything}}
             cont_patch = patches.setdefault(cont_name, {})
             if name in ("mem", "cpu"):
-                set_rsrc(cont_patch, name, value)
+                set_rsrc(cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
                 continue
             elif name == "replicas":
                 replicas = int(value)
