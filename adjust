@@ -377,12 +377,12 @@ def raw_query(appname, desc):
 
         # list of pods, for runtime_id
         try:
+            rs = k_get(appname, ["-l", sel, "rs"])['items']
+            latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
             pods = k_get(appname, ["-l", sel, "pods"])
-            pods = pods["items"]
-            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods if not all((cs['state'].get('terminated') for cs in pod['status']['containerStatuses']))]
-            restart_counts[dep_name] = [ { 'name': cont_stat['name'], 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] ]
-            # print(runtime_ids)
-            # print(pods)
+            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+            restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] ]
         except subprocess.CalledProcessError as e:
             # TODO: re-implement graceful failure
             # Adjust.print_json_error(error="warning", cl="CalledProcessError", message='Unable to retrieve pods: {}. Output: {}'.format(e, e.output))
@@ -831,30 +831,25 @@ def update(appname, desc, data, print_progress):
 # TODO: adjust progress accounting when there is settlement_time!=0
     # wait and watch the app, checking for changes
     w = Waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
-    restart_detected_last_iteration = False
     try:
         while w.wait():
             testdata, raw, restart_counts = raw_query(appname, desc)
+            # check for container restart
+            restarted_containers = {}
+            for k, v in restart_counts.items():
+                cur_conts = { sv['pod+container']: sv['restartCount'] for sv in v if sv['restartCount'] > 0 }
+                if cur_conts:
+                    restarted_containers[k] = cur_conts
+
+            if restarted_containers:
+                raise AdjustError("component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
+                        ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )), 
+                    status="rejected", reason="unstable")
+
             mon = testdata["monitoring"]
             # compare to initial mon data set
             if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
-                # distinguish between crash and intentional restart
-                restarted_containers = {}
-                for k, v in restart_counts.items():
-                    cur_conts = { sv['name']: sv['restartCount'] for sv in v if sv['restartCount'] > 0 }
-                    if cur_conts:
-                        restarted_containers[k] = cur_conts
-
-                if restarted_containers:
-                    raise AdjustError("component(s) crash restart detected. Restarted deployments {{containers}}: {}".format(
-                            ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )), 
-                        status="rejected", reason="unstable")
-                else:
-                    if restart_detected_last_iteration:
-                        raise AdjustError("component(s) intentional restart detected", status="transient-failure", reason="app-restart")
-                    
-                    restart_detected_last_iteration = True
-                    continue
+                raise AdjustError("component(s) intentional restart detected", status="transient-failure", reason="app-restart")
     # TODO: what to do with version change?
     #        if mon["version_id"] != mon0["version_id"]:
     #            raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
