@@ -834,6 +834,9 @@ def update(appname, desc, data, print_progress):
                     e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
                 except AdjustError as se:
                     e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                except Exception as se:
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                    raise
                 else:
                     e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
             if onfail == "destroy":
@@ -847,6 +850,9 @@ def update(appname, desc, data, print_progress):
                     e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
                 except AdjustError as se:
                     e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                except Exception as se:
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                    raise
                 else:
                     e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
             raise
@@ -916,6 +922,9 @@ def update(appname, desc, data, print_progress):
                 e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
             except AdjustError as se:
                 e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+            except Exception as se:
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                raise
             else:
                 e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]  
         if onfail == "destroy":
@@ -930,6 +939,9 @@ def update(appname, desc, data, print_progress):
                 e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
             except AdjustError as se:
                 e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+            except Exception as se:
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                raise
             else:
                 e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
         # if e.status != 'rejected':
