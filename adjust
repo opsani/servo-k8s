@@ -824,8 +824,10 @@ def update(appname, desc, data, print_progress):
             onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
             if onfail == "rollback":
                 try:
-                    subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                    subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                     print("UNDONE", file=sys.stderr)
+                    dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
                 except subprocess.CalledProcessError:
                     # progress msg with warning TODO
                     print("undo for {} failed: {}".format(n, e), file=sys.stderr)
@@ -894,7 +896,9 @@ def update(appname, desc, data, print_progress):
         if onfail == "rollback":
             try:
                 for n in patchlst.keys():
-                    subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                    subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                    dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
                 print("UNDONE", file=sys.stderr)
             except subprocess.CalledProcessError:
                 # progress msg with warning TODO
