@@ -63,16 +63,28 @@ variable. The `default` value will be used at the time of a first adjustment in 
 Only environment variables with a key `value` are supported. We do not support environment variables that
 have `valueFrom` value-defining property. Those without `value` should not be listed in section `env`.
 
-The configuration may also define an `adjust_on` clause at the same level as the section `application`. When specified
-`adjust_on` should define a python statement to be used as a condition for enabling adjustment. This statement has access
-to the adjustment input in the form of a dictionary named `data`. When the condition evaluates to false, all k8s adjustment
-will be skipped for that adjustment iteration
+The the following optional configurations may also be defined at the same level as the section `application`:
+
+- `adjust_on` - When specified, `adjust_on` should define a python statement to be used as a condition for enabling adjustment. This statement has access
+    to the adjustment input in the form of a dictionary named `data`. When the condition evaluates to false, all k8s adjustment
+    will be skipped for that adjustment iteration
+
+- `on_fail` - When specified, on fail can be set to one of the following behaviors to be executed in the event of an adjustment failure:
+  - `rollback` - (default) Rolls back the failed deployment with `kubectl rollout undo`
+  - `destroy` - Scales the failed deployment to 0 replicas with `kubectl patch -p '{ "spec": { "replicas": 0 } }'`
+  - `nop` - Take no remedial action
+
+- `settlement` - How much time (in seconds) to wait and monitor target deployments for instability before
+considering an adjustment to be successful. Useful for when a pod passes the initial health check but fails some time
+afterward.
 
 Example `config.yaml` configuration file:
 
 ```yaml
     k8s:
         adjust_on: data["control"]["userdata"]["deploy_to"] == "canary" # Optional, if specified will adjust only if expression is true
+        on_fail: rollback # Behavior to enact on a failed adjustment, defaults to rollback. Valid options: 'destroy', 'rollback', and 'nop'
+        settlement: 300 # How long to monitor deployments before considering adjustment to be successful
         application:
             components:
                 nginx/frontend:
