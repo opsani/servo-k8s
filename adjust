@@ -572,12 +572,15 @@ def test_dep_progress(dep):
 
     # no errors and not complete yet, assume in-progress
     # (NOTE if "Progressing" condition isn't found, but updated replicas is good, we will return 100% progress; in this case check that other counts are correct, as well!
-    progress = dep_status.get("updatedReplicas", 0)/spec_replicas
-    if progress == 1.0:
-        if (dep_status.get("availableReplicas", None) == spec_replicas and
-                        dep_status.get("readyReplicas", None) == spec_replicas):
-            return (1.0, "") # all good
-        progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
+    if spec_replicas == 0: # If dep is being destroyed
+        progress = 1.0 if dep_status.get("updatedReplicas", 0) == 0 else 0.99/dep_status.get("updatedReplicas", 0)
+    else:
+        progress = dep_status.get("updatedReplicas", 0)/spec_replicas
+        if progress == 1.0:
+            if (dep_status.get("availableReplicas", None) == spec_replicas and
+                            dep_status.get("readyReplicas", None) == spec_replicas):
+                return (1.0, "") # all good
+            progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
 
     # check for pod restarts
     sel = dep["spec"]["selector"]["matchLabels"]
@@ -816,9 +819,9 @@ def update(appname, desc, data, print_progress):
         try:
             wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
         except AdjustError as e:
-            if e.reason != "start-failed": # not undo-able
+            if e.reason not in ["start-failed", "unstable"]: # not undo-able
                 raise
-            onfail = cfg.get("on_fail", "keep") # valid values: keep, destroy, rollback (destroy == scale-to-zero, not supported)
+            onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
             if onfail == "rollback":
                 try:
                     subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
@@ -827,7 +830,13 @@ def update(appname, desc, data, print_progress):
                     # progress msg with warning TODO
                     print("undo for {} failed: {}".format(n, e), file=sys.stderr)
             if onfail == "destroy":
-                pass # TODO
+                try:
+                    destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
+                    print("DESTROYED", file=sys.stderr)
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                except subprocess.CalledProcessError:
+                    # progress msg with warning TODO
+                    print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
             raise
         patched_count = patched_count+1
 
@@ -835,7 +844,7 @@ def update(appname, desc, data, print_progress):
 
     # post-adjust settlement, if enabled
     testdata0, raw, _ = raw_query(appname, desc)
-    settlement_time = cfg.get("settlement", 0)
+    settlement_time = cfg.get("settlement", desc.get("settlement", 0))
     refapp = cfg.get("userdata", {}).get("deployment", None)
     mon0 = testdata0["monitoring"]
 
@@ -855,10 +864,10 @@ def update(appname, desc, data, print_progress):
             testdata, raw, restart_counts = raw_query(appname, desc)
             # check for container restart
             restarted_containers = {}
-            for k, v in restart_counts.items():
-                cur_conts = { sv['pod+container']: sv['restartCount'] for sv in v if sv['restartCount'] > 0 }
+            for dep_name, restarts_list in restart_counts.items():
+                cur_conts = { v['pod+container']: v['restartCount'] for v in restarts_list if v['restartCount'] > 0 }
                 if cur_conts:
-                    restarted_containers[k] = cur_conts
+                    restarted_containers[dep_name] = cur_conts
 
             if restarted_containers:
                 raise AdjustError("component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
@@ -881,6 +890,24 @@ def update(appname, desc, data, print_progress):
                 if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
                     raise AdjustError("", status="transient-failure", reason="ref-app-scale")
     except AdjustError as e:
+        onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
+        if onfail == "rollback":
+            try:
+                for n in patchlst.keys():
+                    subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                print("UNDONE", file=sys.stderr)
+            except subprocess.CalledProcessError:
+                # progress msg with warning TODO
+                print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+        if onfail == "destroy":
+            try:
+                for n in patchlst.keys():
+                    destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                print("DESTROYED", file=sys.stderr)
+            except subprocess.CalledProcessError:
+                # progress msg with warning TODO
+                print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
         # if e.status != 'rejected':
         raise
 
