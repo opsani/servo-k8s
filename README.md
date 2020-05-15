@@ -130,7 +130,7 @@ rules:
   resources: ["deployments"]
   verbs: ["get", "patch"]
 - apiGroups: [""] # "" indicates the core API group
-  resources: ["pods"]
+  resources: ["pods", "replicasets"]
   verbs: ["get"]
 ```
 
