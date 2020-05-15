@@ -578,6 +578,18 @@ def test_dep_progress(dep):
                         dep_status.get("readyReplicas", None) == spec_replicas):
             return (1.0, "") # all good
         progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
+
+    # check for pod restarts
+    sel = dep["spec"]["selector"]["matchLabels"]
+    sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
+    rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+    latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+    pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
+    pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+    restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] if cont_stat['restartCount'] > 0 ]
+    if restart_counts:
+        return(progress, 'component(s) crash restart detected on deployment {}: {}'.format(dep['metadata']['name'], restart_counts))
+
     return (progress, "")
 
 
@@ -634,7 +646,14 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
             break
 
     # loop ended, timed out:
-    raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
+    status="failed"
+    reason="start-failed"
+    err_text = "update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err)
+    if 'component(s) crash restart detected' in err:
+        status="rejected"
+        reason="unstable"
+        err_text = err
+    raise AdjustError(err_text, status=status, reason=reason)
 
 def set_rsrc(cp, sn, sv, sel='both'):
     rn = RESOURCE_MAP[sn]
