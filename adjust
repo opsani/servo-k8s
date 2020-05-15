@@ -828,17 +828,27 @@ def update(appname, desc, data, print_progress):
                     print("UNDONE", file=sys.stderr)
                     dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
                     wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
-                except subprocess.CalledProcessError:
+                except subprocess.CalledProcessError as se:
                     # progress msg with warning TODO
                     print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                except AdjustError as se:
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                else:
+                    e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
             if onfail == "destroy":
                 try:
                     destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
                     print("DESTROYED", file=sys.stderr)
                     wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
-                except subprocess.CalledProcessError:
+                except subprocess.CalledProcessError as se:
                     # progress msg with warning TODO
                     print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                except AdjustError as se:
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                else:
+                    e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
             raise
         patched_count = patched_count+1
 
@@ -900,18 +910,28 @@ def update(appname, desc, data, print_progress):
                     dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
                     wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
                 print("UNDONE", file=sys.stderr)
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as se:
                 # progress msg with warning TODO
-                print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+                print("undo for {} failed: {}".format(n, se), file=sys.stderr)
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+            except AdjustError as se:
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+            else:
+                e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]  
         if onfail == "destroy":
             try:
                 for n in patchlst.keys():
                     destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
                     wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
                 print("DESTROYED", file=sys.stderr)
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as se:
                 # progress msg with warning TODO
                 print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+            except AdjustError as se:
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+            else:
+                e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
         # if e.status != 'rejected':
         raise
 
