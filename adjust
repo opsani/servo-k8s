@@ -258,13 +258,13 @@ def issetting(s):
 def get_rsrc(desc_settings, cont_resources, sn):
     rn = RESOURCE_MAP[sn]
     selector = desc_settings.get(sn, {}).get('selector', 'both')
-    if selector == 'request':
+    if selector == 'request' or selector == 'both':
         val = cont_resources.get("requests", {}).get(rn)
         if val is None:
             val = cont_resources.get("limits", {}).get(rn)
             if val is not None:
                 Adjust.print_json_error(
-                    error='warning', cl=None, 
+                    error='warning', cl=None,
                     message='Using the non-selected value "limit" for resource "{}" as the selected value is not set'.format(sn))
             else:
                 val = "0"
@@ -275,7 +275,7 @@ def get_rsrc(desc_settings, cont_resources, sn):
             if val is not None:
                 if selector == 'limit':
                     Adjust.print_json_error(
-                        error='warning', cl=None, 
+                        error='warning', cl=None,
                         message='Using the non-selected value "request" for resource "{}" as the selected value is not set'.format(sn))
                 # else: don't print warning for 'both'
             else:
@@ -726,7 +726,7 @@ def update(appname, desc, data, print_progress):
             dep_name, cont_name = comp_name.split('/', 1)
         if dep_name not in raw:
             raise AdjustError(
-                'Cannot find deployment with name "{}" for component "{}" in namespace "{}"'.format(dep_name, comp_name, appname), 
+                'Cannot find deployment with name "{}" for component "{}" in namespace "{}"'.format(dep_name, comp_name, appname),
                 status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
         cont_name = cont_name or raw[dep_name]["spec"]["template"]["spec"]["containers"][0]["name"]  # chk for KeyError FIXME
         available_conts = set(c['name'] for c in raw[dep_name]['spec']['template']['spec']['containers'])
@@ -889,7 +889,7 @@ def update(appname, desc, data, print_progress):
 
             if restarted_containers:
                 raise AdjustError("component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
-                        ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )), 
+                        ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )),
                     status="rejected", reason="unstable")
 
             mon = testdata["monitoring"]
@@ -901,7 +901,7 @@ def update(appname, desc, data, print_progress):
     #            raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
             if mon["spec_id"] != mon0["spec_id"]:
                 raise AdjustError("application configuration was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
-            
+
             if refapp:
                 if mon["ref_spec_id"] != mon0["ref_spec_id"]:
                     raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
@@ -926,7 +926,7 @@ def update(appname, desc, data, print_progress):
                 e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
                 raise
             else:
-                e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]  
+                e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
         if onfail == "destroy":
             try:
                 for n in patchlst.keys():
