@@ -573,7 +573,7 @@ def test_dep_progress(dep):
     # no errors and not complete yet, assume in-progress
     # (NOTE if "Progressing" condition isn't found, but updated replicas is good, we will return 100% progress; in this case check that other counts are correct, as well!
     if spec_replicas == 0: # If dep is being destroyed
-        progress = 1.0 if dep_status.get("updatedReplicas", 0) == 0 else 0.99/dep_status.get("updatedReplicas", 0)
+        progress = 1.0 if dep_status.get("replicas", 0) == 0 else 0.99/dep_status.get("replicas", 0)
     else:
         progress = dep_status.get("updatedReplicas", 0)/spec_replicas
         if progress == 1.0:
@@ -587,8 +587,12 @@ def test_dep_progress(dep):
     sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
     rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
     latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+    if progress == 1.0 and spec_replicas == 0:
+        progress = 1.0 if latest_rs['status']['replicas'] == 0 else 0.99/latest_rs['status']['replicas']
     pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
     pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+    if progress == 1.0 and spec_replicas == 0:
+        progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
     restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] if cont_stat['restartCount'] > 0 ]
     if restart_counts:
         return(progress, 'component(s) crash restart detected on deployment {}: {}'.format(dep['metadata']['name'], restart_counts))
