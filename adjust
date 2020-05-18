@@ -877,8 +877,10 @@ def update(appname, desc, data, print_progress):
 # TODO: adjust progress accounting when there is settlement_time!=0
     # wait and watch the app, checking for changes
     w = Waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
+    m = "waiting for k8s settlement"
     try:
         while w.wait():
+            print_progress(100, m)
             testdata, raw, restart_counts = raw_query(appname, desc)
             # check for container restart
             restarted_containers = {}
