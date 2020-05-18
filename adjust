@@ -23,10 +23,10 @@ json_enc = json.JSONEncoder(separators=(",", ":")).encode
 DESC_FILE = "./config.yaml"
 EXCLUDE_LABEL = 'optune.ai/exclude'
 Gi = 1024 * 1024 * 1024
-MEM_STEP = 128 * 1024 * 1024  # minimal useful increment in mem limit/reserve, bytes
-CPU_STEP = 0.0125  # 1.25% of a core (even though 1 millicore is the highest resolution supported by k8s)
-MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
-MAX_CPU = 4.0  # cores
+DFLT_MEM_STEP = 128 * 1024 * 1024  # minimal useful increment in mem limit/reserve, 1/8th of a GiB in bytes
+DFLT_CPU_STEP = 0.125  # 12.5% or 1/8th of a core
+DFLT_MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
+DFLT_MAX_CPU = 4.0  # cores
 # MAX_REPLICAS = 1000 # arbitrary, TBD
 
 # the k8s obj to which we make queries/updates:
@@ -403,19 +403,21 @@ def raw_query(appname, desc):
             if read_mem:
                 mem_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='mem')
                 # (value, min, max, step) all in GiB
+                mem_cfg = settings.get('mem') or {}
                 settings["mem"] = numval(v=memunits(mem_val) / Gi,
-                                         minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
-                                         maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
-                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
-                                         pinn=(settings.get('mem') or {}).get('pinned', None))
+                                         minv=mem_cfg.get('min', mem_cfg.get('step', DFLT_MEM_STEP / Gi)),
+                                         maxv=mem_cfg.get('max', DFLT_MAX_MEM / Gi),
+                                         step=mem_cfg.get('step', DFLT_MEM_STEP / Gi),
+                                         pinn=mem_cfg.get('pinned', None))
             if read_cpu:
                 cpu_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='cpu')
                 # (value, min, max, step), all in CPU cores
+                cpu_cfg = settings.get('cpu') or {}
                 settings["cpu"] = numval(v=cpuunits(cpu_val),
-                                         minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
-                                         maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
-                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP),
-                                         pinn=(settings.get('cpu') or {}).get('pinned', None))
+                                         minv=cpu_cfg.get('min', cpu_cfg.get('step', DFLT_CPU_STEP)),
+                                         maxv=cpu_cfg.get('max', DFLT_MAX_CPU),
+                                         step=cpu_cfg.get('step', DFLT_CPU_STEP),
+                                         pinn=cpu_cfg.get('pinned', None))
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
@@ -632,7 +634,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
 def set_rsrc(cp, sn, sv, sel='both'):
     rn = RESOURCE_MAP[sn]
     if sn == "mem":
-        sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
+        sv = '{}Gi'.format(float(round(sv * Gi)) / Gi) # Round to nearest byte, internal memory representation is in GiB
     else:
         sv = str(round(sv,3))
 
