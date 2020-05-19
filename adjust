@@ -382,7 +382,7 @@ def raw_query(appname, desc):
             pods = k_get(appname, ["-l", sel, "pods"])
             pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
             runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
-            restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] ]
+            restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) ]
         except subprocess.CalledProcessError as e:
             # TODO: re-implement graceful failure
             # Adjust.print_json_error(error="warning", cl="CalledProcessError", message='Unable to retrieve pods: {}. Output: {}'.format(e, e.output))
@@ -593,7 +593,7 @@ def test_dep_progress(dep):
     pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
     if progress == 1.0 and spec_replicas == 0:
         progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
-    restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status']['containerStatuses'] if cont_stat['restartCount'] > 0 ]
+    restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) if cont_stat['restartCount'] > 0 ]
     if restart_counts:
         return(progress, 'component(s) crash restart detected on deployment {}: {}'.format(dep['metadata']['name'], restart_counts))
 
@@ -662,7 +662,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
         err_text = err
     raise AdjustError(err_text, status=status, reason=reason)
 
-def set_rsrc(cp, sn, sv, sel='both'):
+def set_rsrc(cont, cp, sn, sv, sel='both'):
     rn = RESOURCE_MAP[sn]
     if sn == "mem":
         sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
@@ -671,9 +671,12 @@ def set_rsrc(cp, sn, sv, sel='both'):
 
     if sel == 'request':
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
+        if cont.get("resources", {}).get("limits", {}).get(rn) is not None:
+            cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
     elif sel == 'limit':
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
-        cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
+        if cont.get("resources", {}).get("requests", {}).get(rn) is not None:
+            cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
     else: # both
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
@@ -732,8 +735,8 @@ def update(appname, desc, data, print_progress):
                 'Cannot find deployment with name "{}" for component "{}" in namespace "{}"'.format(dep_name, comp_name, appname),
                 status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
         cont_name = cont_name or raw[dep_name]["spec"]["template"]["spec"]["containers"][0]["name"]  # chk for KeyError FIXME
-        available_conts = set(c['name'] for c in raw[dep_name]['spec']['template']['spec']['containers'])
-        if cont_name not in available_conts:
+        tgt_container = next((c for c in raw[dep_name]["spec"]["template"]["spec"]["containers"] if c["name"] == cont_name), None)
+        if tgt_container is None:
             raise AdjustError('Could not find container with name "{}" in deployment "{}" ' \
                                              'for component "{}" in namespace "{}".'.format(cont_name, dep_name,
                                                                                             comp_name, appname),
@@ -772,7 +775,7 @@ def update(appname, desc, data, print_progress):
             value = _value(value) # compatibility: allow a scalar, but also work with {"value": {anything}}
             cont_patch = patches.setdefault(cont_name, {})
             if name in ("mem", "cpu"):
-                set_rsrc(cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
+                set_rsrc(tgt_container, cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
                 continue
             elif name == "replicas":
                 replicas = int(value)
