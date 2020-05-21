@@ -554,14 +554,21 @@ def test_dep_progress(dep):
     error = None
     progress_final = None
     dep_status = dep["status"]
+
+    sel = dep["spec"]["selector"]["matchLabels"]
+    sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
+    rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+    latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+    rs_status = latest_rs["status"]
+
     for co in dep_status["conditions"]:
         dbg_log('... condition type {}, reason {}, status {}, message {}'.format(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
         if co["type"] == "Progressing":
             if co["status"] == "True" and co["reason"] == "NewReplicaSetAvailable":
                 # if the replica set was updated, test the replica counts
                 if dep_status.get("updatedReplicas", None) == spec_replicas: # update complete, check other counts
-                    if (dep_status.get("availableReplicas", None) == spec_replicas and
-                        dep_status.get("readyReplicas", None) == spec_replicas):
+                    if (rs_status.get("availableReplicas", None) == spec_replicas and
+                        rs_status.get("readyReplicas", None) == spec_replicas):
                         return (1.0, "") # done
             elif co["status"] == "False": # failed
                 return (dep_status.get("updatedReplicas", 0)/spec_replicas, co["reason"] + ", " + co.get("message", ""))
@@ -577,18 +584,12 @@ def test_dep_progress(dep):
     else:
         progress = dep_status.get("updatedReplicas", 0)/spec_replicas
         if progress == 1.0:
-            if (dep_status.get("availableReplicas", None) == spec_replicas and
-                            dep_status.get("readyReplicas", None) == spec_replicas):
+            if (rs_status.get("availableReplicas", None) == spec_replicas and
+                            rs_status.get("readyReplicas", None) == spec_replicas):
                 return (1.0, "") # all good
             progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
 
     # check for pod restarts
-    sel = dep["spec"]["selector"]["matchLabels"]
-    sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
-    rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
-    latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
-    if progress == 1.0 and spec_replicas == 0:
-        progress = 1.0 if latest_rs['status']['replicas'] == 0 else 0.99/latest_rs['status']['replicas']
     pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
     pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
     if progress == 1.0 and spec_replicas == 0:
