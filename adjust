@@ -594,7 +594,7 @@ def test_dep_progress(dep):
     if progress == 1.0 and spec_replicas == 0:
         progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
     restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) if cont_stat['restartCount'] > 0 ]
-    if restart_counts:
+    if restart_counts and spec_replicas > 0:
         return(progress, 'component(s) crash restart detected on deployment {}: {}'.format(dep['metadata']['name'], restart_counts))
 
     return (progress, "")
@@ -886,7 +886,7 @@ def update(appname, desc, data, print_progress):
     m = "waiting for k8s settlement"
     try:
         while w.wait():
-            print_progress(100, m)
+            print_progress(99, m)
             testdata, raw, restart_counts = raw_query(appname, desc)
             # check for container restart
             restarted_containers = {}
