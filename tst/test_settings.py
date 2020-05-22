@@ -287,6 +287,9 @@ def test_adjust_settings_cpu_limits():
     all_deps = k_get('deployment')
     dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-cpu')))
     assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('requests', {}).get('cpu') is None
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-cpu': {'settings': {'cpu': {'value': .125}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-cpu']['settings']['cpu']['value'] == .125
     cleanup_deployment(dep)
 
 
@@ -325,14 +328,16 @@ def test_adjust_settings_mem_limits():
                 selector: limit
     """
     setup_deployment(dep)
-    adjust_dep(cfg,
-               {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .125}}}}}})
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .125}}}}}})
     desc = query_dep(cfg)
     assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .125
     # assert non-selector resource is cleared
     all_deps = k_get('deployment')
     dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-mem')))
     assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('requests', {}).get('memory') is None
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .25}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .25
     cleanup_deployment(dep)
 
 
@@ -378,6 +383,9 @@ def test_adjust_settings_cpu_requests():
     all_deps = k_get('deployment')
     dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-cpu')))
     assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('cpu') is None
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-cpu': {'settings': {'cpu': {'value': .125}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-cpu']['settings']['cpu']['value'] == .125
     cleanup_deployment(dep)
 
 
@@ -416,12 +424,14 @@ def test_adjust_settings_mem_requests():
                 selector: request
     """
     setup_deployment(dep)
-    adjust_dep(cfg,
-               {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .125}}}}}})
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .125}}}}}})
     desc = query_dep(cfg)
     assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .125
     # assert non-selector resource is cleared
     all_deps = k_get('deployment')
     dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-mem')))
     assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('memory') is None
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .25}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .25
     cleanup_deployment(dep)
