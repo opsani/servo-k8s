@@ -282,7 +282,7 @@ def get_rsrc(desc_settings, cont_resources, sn):
                 val = "0"
     return val
 
-def raw_query(appname, desc):
+def raw_query(appname, desc, pod_debug=False):
     """
     Read the list of deployments in a namespace and fill in data into desc.
     Both the input 'desc' and the return value are in the 'settings query response' format.
@@ -379,6 +379,9 @@ def raw_query(appname, desc):
         try:
             rs = k_get(appname, ["-l", sel, "rs"])['items']
             latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+            if pod_debug:
+                output = subprocess.check_output(kubectl(appname, 'get', '-l', sel, "pods"))
+                print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
             pods = k_get(appname, ["-l", sel, "pods"])
             pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
             runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
@@ -868,7 +871,7 @@ def update(appname, desc, data, print_progress):
 # spec_id and version_id should be tested without settlement_time, too - TODO
 
     # post-adjust settlement, if enabled
-    testdata0, raw, _ = raw_query(appname, desc)
+    testdata0, raw, _ = raw_query(appname, desc, pod_debug=True)
     settlement_time = cfg.get("settlement", desc.get("settlement", 0))
     refapp = cfg.get("userdata", {}).get("deployment", None)
     mon0 = testdata0["monitoring"]
@@ -888,7 +891,7 @@ def update(appname, desc, data, print_progress):
     try:
         while w.wait():
             print_progress(99, m)
-            testdata, raw, restart_counts = raw_query(appname, desc)
+            testdata, raw, restart_counts = raw_query(appname, desc, pod_debug=True)
             # check for container restart
             restarted_containers = {}
             for dep_name, restarts_list in restart_counts.items():
