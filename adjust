@@ -398,25 +398,32 @@ def raw_query(appname, desc):
         read_mem = not settings or 'mem' in settings
         read_cpu = not settings or 'cpu' in settings
         read_replicas = not settings or 'replicas' in settings
-        res = cont.get("resources")
-        if res:
-            if read_mem:
-                mem_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='mem')
-                # (value, min, max, step) all in GiB
-                settings["mem"] = numval(v=memunits(mem_val) / Gi,
-                                         minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
-                                         maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
-                                         step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
-                                         pinn=(settings.get('mem') or {}).get('pinned', None))
-            if read_cpu:
-                cpu_val = get_rsrc(desc_settings=settings, cont_resources=res, sn='cpu')
-                # (value, min, max, step), all in CPU cores
-                settings["cpu"] = numval(v=cpuunits(cpu_val),
-                                         minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
-                                         maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
-                                         step=(settings.get('cpu') or {}).get('step', CPU_STEP),
-                                         pinn=(settings.get('cpu') or {}).get('pinned', None))
-            # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
+        res = cont.get("resources") or {}
+        
+        if read_mem:
+            if res.get('requests', {}).get('memory') is None and res.get('limits', {}).get('memory') is None:
+                mem_val = settings.get('mem', {}).get('max', MAX_MEM)
+            else:
+                mem_val = memunits(get_rsrc(desc_settings=settings, cont_resources=res, sn='mem')) / Gi
+            # (value, min, max, step) all in GiB
+            settings["mem"] = numval(v=mem_val,
+                                        minv=(settings.get('mem') or {}).get('min', MEM_STEP / Gi),
+                                        maxv=(settings.get('mem') or {}).get('max', MAX_MEM / Gi),
+                                        step=(settings.get('mem') or {}).get('step', MEM_STEP / Gi),
+                                        pinn=(settings.get('mem') or {}).get('pinned', None))
+        if read_cpu:
+            if res.get('requests', {}).get('cpu') is None and res.get('limits', {}).get('cpu') is None:
+                cpu_val = settings.get('cpu', {}).get('max', MAX_CPU)
+            else:
+                cpu_val = cpuunits(get_rsrc(desc_settings=settings, cont_resources=res, sn='cpu'))
+            # (value, min, max, step), all in CPU cores
+            settings["cpu"] = numval(v=cpu_val,
+                                        minv=(settings.get('cpu') or {}).get('min', CPU_STEP),
+                                        maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
+                                        step=(settings.get('cpu') or {}).get('step', CPU_STEP),
+                                        pinn=(settings.get('cpu') or {}).get('pinned', None))
+        # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
+
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
         if read_replicas:
