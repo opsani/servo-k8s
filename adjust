@@ -529,9 +529,11 @@ class Waiter(object):
         self.expired = False
 
     def wait(self):
-        time.sleep(self.delay)  # TODO: add support for increasing delay over time
         self.expired = self.end < self.timefn()
-        return not self.expired
+        waiting = not self.expired
+        if waiting:
+            time.sleep(self.delay)  # TODO: add support for increasing delay over time
+        return waiting
 
 
 def test_dep_generation(dep, g):
@@ -886,7 +888,7 @@ def update(appname, desc, data, print_progress):
 
 # TODO: adjust progress accounting when there is settlement_time!=0
     # wait and watch the app, checking for changes
-    w = Waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
+    w = Waiter(settlement_time, delay=min(settlement_time, 5)) # NOTE: delay between tests may be made longer than the delay between progress reports
     m = "waiting for k8s settlement"
     try:
         while w.wait():
@@ -908,9 +910,9 @@ def update(appname, desc, data, print_progress):
             # compare to initial mon data set
             if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
                 raise AdjustError("component(s) intentional restart detected", status="transient-failure", reason="app-restart")
-    # TODO: what to do with version change?
-    #        if mon["version_id"] != mon0["version_id"]:
-    #            raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
+            # TODO: what to do with version change?
+            # if mon["version_id"] != mon0["version_id"]:
+            #     raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
             if mon["spec_id"] != mon0["spec_id"]:
                 raise AdjustError("application configuration was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
 
@@ -919,6 +921,28 @@ def update(appname, desc, data, print_progress):
                     raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
                 if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
                     raise AdjustError("", status="transient-failure", reason="ref-app-scale")
+        
+        # Final readiness check
+        unready_dep_pods = {}
+        for n in patchlst.keys():
+            dep = k_get(appname, DEPLOYMENT+"/"+n)
+            sel = dep["spec"]["selector"]["matchLabels"]
+            sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
+
+            rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+            latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+
+            pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
+            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+            
+            unready_pods = [p['metadata']['name'] for p in pods if any( cs['ready'] == False for cs in p['status'].get('containerStatuses', []) )]
+            if unready_pods:
+                unready_dep_pods[n] = unready_pods
+
+        if unready_dep_pods:
+            raise AdjustError("Deployment pods not ready after settlement expired: {}".format(unready_dep_pods),
+                status="rejected", reason="unstable")
+
     except AdjustError as e:
         onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
         if onfail == "rollback":
