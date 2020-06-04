@@ -612,7 +612,7 @@ def test_dep_progress(dep):
 # ? do we need to use --to-revision with the undo command?
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
-def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40, phase=''):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 5 # time to wait for object update ('observedGeneration')
     # wait_for_progress = 40 # time to wait for rollout to complete
@@ -661,11 +661,11 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     # loop ended, timed out:
     status="failed"
     reason="start-failed"
-    err_text = "update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err)
+    err_text = "during {}; update of {} failed: timed out waiting for replicas to come up, status: {}".format(phase, obj, err)
     if 'component(s) crash restart detected' in err:
         status="rejected"
         reason="unstable"
-        err_text = err
+        err_text = 'during {}; {}'.format(phase, err)
     raise AdjustError(err_text, status=status, reason=reason)
 
 def set_rsrc(cont, cp, sn, sv, sel='both'):
@@ -829,17 +829,17 @@ def update(appname, desc, data, print_progress):
         # wait for update to complete (and print progress)
         # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
         try:
-            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'rollout')
         except AdjustError as e:
             if e.reason not in ["start-failed", "unstable"]: # not undo-able
                 raise
             onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
-            if onfail == "rollback":
+            if onfail == "rollback" or onfail == "destroy_new":
                 try:
                     subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                     print("UNDONE", file=sys.stderr)
                     dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
-                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'rollback')
                 except subprocess.CalledProcessError as se:
                     # progress msg with warning TODO
                     print("undo for {} failed: {}".format(n, e), file=sys.stderr)
@@ -855,7 +855,7 @@ def update(appname, desc, data, print_progress):
                 try:
                     destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
                     print("DESTROYED", file=sys.stderr)
-                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'destroy')
                 except subprocess.CalledProcessError as se:
                     # progress msg with warning TODO
                     print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
@@ -902,14 +902,14 @@ def update(appname, desc, data, print_progress):
                     restarted_containers[dep_name] = cur_conts
 
             if restarted_containers:
-                raise AdjustError("component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
+                raise AdjustError("during settlement; component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
                         ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )),
                     status="rejected", reason="unstable")
 
             mon = testdata["monitoring"]
             # compare to initial mon data set
             if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
-                raise AdjustError("component(s) intentional restart detected", status="transient-failure", reason="app-restart")
+                raise AdjustError("during settlement; component(s) intentional restart detected", status="transient-failure", reason="app-restart")
             # TODO: what to do with version change?
             # if mon["version_id"] != mon0["version_id"]:
             #     raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
@@ -920,7 +920,7 @@ def update(appname, desc, data, print_progress):
                 if mon["ref_spec_id"] != mon0["ref_spec_id"]:
                     raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
                 if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
-                    raise AdjustError("", status="transient-failure", reason="ref-app-scale")
+                    raise AdjustError("reference application replicas count changed unexpectedly during settlement", status="transient-failure", reason="ref-app-scale")
         
         # Final readiness check
         unready_dep_pods = {}
@@ -950,7 +950,7 @@ def update(appname, desc, data, print_progress):
                 for n in patchlst.keys():
                     subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                     dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
-                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'settlement rollback')
                 print("UNDONE", file=sys.stderr)
             except subprocess.CalledProcessError as se:
                 # progress msg with warning TODO
@@ -963,11 +963,11 @@ def update(appname, desc, data, print_progress):
                 raise
             else:
                 e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
-        if onfail == "destroy":
+        if onfail == "destroy" or onfail == "destroy_new":
             try:
                 for n in patchlst.keys():
                     destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
-                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'settlement destroy')
                 print("DESTROYED", file=sys.stderr)
             except subprocess.CalledProcessError as se:
                 # progress msg with warning TODO
