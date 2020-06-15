@@ -659,11 +659,10 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
             break
 
     # loop ended, timed out:
-    status="failed"
+    status="rejected"
     reason="start-failed"
     err_text = "during {}; update of {} failed: timed out waiting for replicas to come up, status: {}".format(phase, obj, err)
     if 'component(s) crash restart detected' in err:
-        status="rejected"
         reason="unstable"
         err_text = 'during {}; {}'.format(phase, err)
     raise AdjustError(err_text, status=status, reason=reason)
