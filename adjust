@@ -429,8 +429,10 @@ def raw_query(appname, desc, pod_debug=False):
         else:
             if read_mem:
                 settings["mem"]['type'] = 'range'
+                settings["mem"]['value'] = None
             if read_cpu:
                 settings["cpu"]['type'] = 'range'
+                settings["cpu"]['value'] = None
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
