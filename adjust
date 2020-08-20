@@ -9,7 +9,7 @@ import errno
 import subprocess
 import time
 
-from collections import Iterable
+from collections.abc import Iterable
 
 import json
 import yaml
@@ -104,9 +104,12 @@ def kubectl(namespace, *args):
         cmd_args.append('--token=' + os.getenv('OPTUNE_K8S_TOKEN'))
     if bool(os.getenv('OPTUNE_K8S_SKIP_TLS_VERIFY', False)):
         cmd_args.append('--insecure-skip-tls-verify=true')
-    print("DEBUG: ns='{}', env='{}', r='{}', args='{}'".format(
-        namespace, os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '???'), cmd_args, list(args)),
-        file=sys.stderr)
+    dbg_txt = "DEBUG: ns='{}', env='{}', r='{}', args='{}'".format(
+        namespace, os.environ.get('OPTUNE_USE_DEFAULT_NAMESPACE', '???'), cmd_args, list(args))
+    if args[0] == 'patch':
+        print(dbg_txt, file=sys.stderr)
+    else:
+        dbg_log(dbg_txt)
     return cmd_args + list(args)
 
 def k_get(namespace, qry):
