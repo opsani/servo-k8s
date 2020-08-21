@@ -142,8 +142,11 @@ rules:
   resources: ["deployments"]
   verbs: ["get", "patch"]
 - apiGroups: [""] # "" indicates the core API group
-  resources: ["pods", "replicasets"]
+  resources: ["pods"]
   verbs: ["get"]
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list"]
 ```
 
 ## Running the tests
