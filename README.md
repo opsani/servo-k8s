@@ -138,15 +138,12 @@ metadata:
   namespace: <TARGET_NAMESPACE>
   name: <ROLE_NAME>
 rules:
-- apiGroups: [""] # "" indicates the core API group
-  resources: ["deployments"]
-  verbs: ["get", "patch"]
-- apiGroups: [""] # "" indicates the core API group
-  resources: ["pods"]
-  verbs: ["get"]
 - apiGroups: ["apps"]
-  resources: ["replicasets"]
-  verbs: ["get", "list"]
+  resources: ["deployments","replicasets","PodDisruptionBudget"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods","pods/logs","namespaces"]
+  verbs: ["get", "list", "watch" ]
 ```
 
 ## Running the tests
