@@ -139,10 +139,13 @@ metadata:
   name: <ROLE_NAME>
 rules:
 - apiGroups: ["apps"]
-  resources: ["deployments","replicasets","PodDisruptionBudget"]
+  resources: ["deployments", "PodDisruptionBudget"]
   verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
-  resources: ["pods","pods/logs","namespaces"]
+  resources: ["pods", "pods/logs" ,"namespaces"]
   verbs: ["get", "list", "watch" ]
 ```
 
