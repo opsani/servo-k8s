@@ -49,7 +49,7 @@ def setcfg(fname):
 def run(cmd):
     """basic execution of a command, stdout and stderr are not redirected (end up in py.test logs), raise exception on errors"""
     # nosec below as test suite is not intended to run in production environment, invocations all use static input
-    subprocess.run(cmd, shell=True, check=True) # nosec
+    return subprocess.check_output(cmd, shell=True)
 
 def silent(cmd):
     """run a command and ignore stdout/stderr and non-zero exit status"""

@@ -261,13 +261,13 @@ def issetting(s):
 def get_rsrc(desc_settings, cont_resources, sn):
     rn = RESOURCE_MAP[sn]
     selector = desc_settings.get(sn, {}).get('selector', 'both')
-    if selector == 'request':
+    if selector == 'request' or selector == 'both':
         val = cont_resources.get("requests", {}).get(rn)
         if val is None:
             val = cont_resources.get("limits", {}).get(rn)
             if val is not None:
                 Adjust.print_json_error(
-                    error='warning', cl=None, 
+                    error='warning', cl=None,
                     message='Using the non-selected value "limit" for resource "{}" as the selected value is not set'.format(sn))
             else:
                 val = "0"
@@ -278,14 +278,14 @@ def get_rsrc(desc_settings, cont_resources, sn):
             if val is not None:
                 if selector == 'limit':
                     Adjust.print_json_error(
-                        error='warning', cl=None, 
+                        error='warning', cl=None,
                         message='Using the non-selected value "request" for resource "{}" as the selected value is not set'.format(sn))
                 # else: don't print warning for 'both'
             else:
                 val = "0"
     return val
 
-def raw_query(appname, desc):
+def raw_query(appname, desc, pod_debug=False):
     """
     Read the list of deployments in a namespace and fill in data into desc.
     Both the input 'desc' and the return value are in the 'settings query response' format.
@@ -311,7 +311,7 @@ def raw_query(appname, desc):
         refcomps = {refapp: comps[list(comps.keys())[0]]}
         d2["application"] = {"components":refcomps} # single component, renamed (so we pick the 'reference deployment' in the same namespace)
         try:
-            refqry, _ = raw_query(appname, d2)
+            refqry, _, _ = raw_query(appname, d2)
         except AdjustError as e:
             raise AdjustError(str(e), status="aborted", reason="ref-app-unavailable")
         # let other exceptions go unchanged
@@ -336,6 +336,7 @@ def raw_query(appname, desc):
     raw_specs = {}
     imgs = {}
     runtime_ids = {}
+    restart_counts = {}
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
     for full_comp_name in comps.keys():
@@ -379,11 +380,20 @@ def raw_query(appname, desc):
 
         # list of pods, for runtime_id
         try:
+            rs = k_get(appname, ["-l", sel, "rs"])['items']
+            latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+            if pod_debug:
+                output = subprocess.check_output(kubectl(appname, 'get', '-l', sel, "pods"))
+                print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
             pods = k_get(appname, ["-l", sel, "pods"])
-            pods = pods["items"]
+            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
             runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+            restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) ]
         except subprocess.CalledProcessError as e:
-            Adjust.print_json_error(error="warning", cl="CalledProcessError", message='Unable to retrieve pods: {}. Output: {}'.format(e, e.output))
+            # TODO: re-implement graceful failure
+            # Adjust.print_json_error(error="warning", cl="CalledProcessError", message='Unable to retrieve pods: {}. Output: {}'.format(e, e.output))
+            raise AdjustError('Unable to get pods for deployment {}: rc {}, output: {}'.format(dep_name, e.returncode, e.output),
+                status="aborted", reason="app-unavailable")
 
         # extract deployment settings
         # NOTE: generation, resourceVersion and uid can help detect changes
@@ -419,6 +429,13 @@ def raw_query(appname, desc):
                                          maxv=(settings.get('cpu') or {}).get('max', MAX_CPU),
                                          step=(settings.get('cpu') or {}).get('step', CPU_STEP),
                                          pinn=(settings.get('cpu') or {}).get('pinned', None))
+        else:
+            if read_mem:
+                settings["mem"]['type'] = 'range'
+                settings["mem"]['value'] = None
+            if read_cpu:
+                settings["cpu"]['type'] = 'range'
+                settings["cpu"]['value'] = None
             # TODO: adjust min/max to include current values, (e.g., increase mem_max to at least current if current > max)
         # set replicas: FIXME: can't actually be set for each container (the pod as a whole is replicated); for now we have no way of expressing this limitation in the setting descriptions
         # note: setting min=max=current replicas, since there is no way to know what is allowed; use override descriptor to loosen range
@@ -470,8 +487,8 @@ def raw_query(appname, desc):
             del comp['command']
 
 
-    if runtime_ids:
-        mon_data['runtime_id'] = get_hash(runtime_ids)
+    # if runtime_ids:
+    mon_data['runtime_id'] = get_hash(runtime_ids)
 
     # app state data
     # (NOTE we strip the component names because our (single-component) 'reference' app will necessarily have a different component name)
@@ -485,7 +502,7 @@ def raw_query(appname, desc):
 
     desc["monitoring"] = mon_data
 
-    return desc, deps_list
+    return desc, deps_list, restart_counts
 
 # DEBUG:
 def ydump(fn, data):
@@ -500,7 +517,7 @@ def dbg_log(*args):
 
 
 def query(appname, desc):
-    r, _ = raw_query(appname, desc)
+    r, _, _ = raw_query(appname, desc)
     return r
 
 
@@ -522,9 +539,11 @@ class Waiter(object):
         self.expired = False
 
     def wait(self):
-        time.sleep(self.delay)  # TODO: add support for increasing delay over time
         self.expired = self.end < self.timefn()
-        return not self.expired
+        waiting = not self.expired
+        if waiting:
+            time.sleep(self.delay)  # TODO: add support for increasing delay over time
+        return waiting
 
 
 def test_dep_generation(dep, g):
@@ -550,14 +569,21 @@ def test_dep_progress(dep):
     error = None
     progress_final = None
     dep_status = dep["status"]
+
+    sel = dep["spec"]["selector"]["matchLabels"]
+    sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
+    rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+    latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+    rs_status = latest_rs["status"]
+
     for co in dep_status["conditions"]:
         dbg_log('... condition type {}, reason {}, status {}, message {}'.format(co.get('type'), co.get('reason'), co.get('status'), co.get('message')))
         if co["type"] == "Progressing":
             if co["status"] == "True" and co["reason"] == "NewReplicaSetAvailable":
                 # if the replica set was updated, test the replica counts
                 if dep_status.get("updatedReplicas", None) == spec_replicas: # update complete, check other counts
-                    if (dep_status.get("availableReplicas", None) == spec_replicas and
-                        dep_status.get("readyReplicas", None) == spec_replicas):
+                    if (rs_status.get("availableReplicas", None) == spec_replicas and
+                        rs_status.get("readyReplicas", None) == spec_replicas):
                         return (1.0, "") # done
             elif co["status"] == "False": # failed
                 return (dep_status.get("updatedReplicas", 0)/spec_replicas, co["reason"] + ", " + co.get("message", ""))
@@ -568,12 +594,25 @@ def test_dep_progress(dep):
 
     # no errors and not complete yet, assume in-progress
     # (NOTE if "Progressing" condition isn't found, but updated replicas is good, we will return 100% progress; in this case check that other counts are correct, as well!
-    progress = dep_status.get("updatedReplicas", 0)/spec_replicas
-    if progress == 1.0:
-        if (dep_status.get("availableReplicas", None) == spec_replicas and
-                        dep_status.get("readyReplicas", None) == spec_replicas):
-            return (1.0, "") # all good
-        progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
+    if spec_replicas == 0: # If dep is being destroyed
+        progress = 1.0 if dep_status.get("replicas", 0) == 0 else 0.99/dep_status.get("replicas", 0)
+    else:
+        progress = dep_status.get("updatedReplicas", 0)/spec_replicas
+        if progress == 1.0:
+            if (rs_status.get("availableReplicas", None) == spec_replicas and
+                            rs_status.get("readyReplicas", None) == spec_replicas):
+                return (1.0, "") # all good
+            progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
+
+    # check for pod restarts
+    pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
+    pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+    if progress == 1.0 and spec_replicas == 0:
+        progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
+    restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) if cont_stat['restartCount'] > 0 ]
+    if restart_counts and spec_replicas > 0:
+        return(progress, 'component(s) crash restart detected on deployment {}: {}'.format(dep['metadata']['name'], restart_counts))
+
     return (progress, "")
 
 
@@ -583,7 +622,7 @@ def test_dep_progress(dep):
 # ? do we need to use --to-revision with the undo command?
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
-def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40, phase=''):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 5 # time to wait for object update ('observedGeneration')
     # wait_for_progress = 40 # time to wait for rollout to complete
@@ -630,9 +669,15 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
             break
 
     # loop ended, timed out:
-    raise AdjustError("update of {} failed: timed out waiting for replicas to come up, status: {}".format(obj, err), status="failed", reason="start-failed")
+    status="rejected"
+    reason="start-failed"
+    err_text = "during {}; update of {} failed: timed out waiting for replicas to come up, status: {}".format(phase, obj, err)
+    if 'component(s) crash restart detected' in err:
+        reason="unstable"
+        err_text = 'during {}; {}'.format(phase, err)
+    raise AdjustError(err_text, status=status, reason=reason)
 
-def set_rsrc(cp, sn, sv, sel='both'):
+def set_rsrc(cont, cp, sn, sv, sel='both'):
     rn = RESOURCE_MAP[sn]
     if sn == "mem":
         sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
@@ -641,10 +686,12 @@ def set_rsrc(cp, sn, sv, sel='both'):
 
     if sel == 'request':
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
-        cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
+        if cont.get("resources", {}).get("limits", {}).get(rn) is not None:
+            cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
     elif sel == 'limit':
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
-        cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
+        if cont.get("resources", {}).get("requests", {}).get(rn) is not None:
+            cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
     else: # both
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
@@ -671,7 +718,7 @@ def update(appname, desc, data, print_progress):
 
     # NOTE: we'll need the raw k8s api data to see the container names (setting names for a single-container
     #       pod will include only the deployment(=pod) name, not the container name)
-    _, raw = raw_query(appname, desc)
+    _, raw, _ = raw_query(appname, desc)
 
     # convert k8s list of deployments into map
     raw = {dep['metadata']['name']: dep for dep in raw}
@@ -699,11 +746,12 @@ def update(appname, desc, data, print_progress):
         if '/' in dep_name:
             dep_name, cont_name = comp_name.split('/', 1)
         if dep_name not in raw:
-            raise AdjustError('Cannot find deployment with name "{}" for component "{}" in namespace "{}"' \
-+                                ''.format(dep_name, comp_name, appname), status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
+            raise AdjustError(
+                'Cannot find deployment with name "{}" for component "{}" in namespace "{}"'.format(dep_name, comp_name, appname),
+                status="failed", reason="unknown") # FIXME 'reason' code (either bad config or invalid input to update())
         cont_name = cont_name or raw[dep_name]["spec"]["template"]["spec"]["containers"][0]["name"]  # chk for KeyError FIXME
-        available_conts = set(c['name'] for c in raw[dep_name]['spec']['template']['spec']['containers'])
-        if cont_name not in available_conts:
+        tgt_container = next((c for c in raw[dep_name]["spec"]["template"]["spec"]["containers"] if c["name"] == cont_name), None)
+        if tgt_container is None:
             raise AdjustError('Could not find container with name "{}" in deployment "{}" ' \
                                              'for component "{}" in namespace "{}".'.format(cont_name, dep_name,
                                                                                             comp_name, appname),
@@ -742,7 +790,7 @@ def update(appname, desc, data, print_progress):
             value = _value(value) # compatibility: allow a scalar, but also work with {"value": {anything}}
             cont_patch = patches.setdefault(cont_name, {})
             if name in ("mem", "cpu"):
-                set_rsrc(cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
+                set_rsrc(tgt_container, cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
                 continue
             elif name == "replicas":
                 replicas = int(value)
@@ -790,26 +838,53 @@ def update(appname, desc, data, print_progress):
         # wait for update to complete (and print progress)
         # timeout default is set to be slightly higher than the default K8s timeout (so we let k8s detect progress stall first)
         try:
-            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630))
+            wait_for_update(appname, n, patch_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'rollout')
         except AdjustError as e:
-            if e.reason != "start-failed": # not undo-able
+            if e.reason not in ["start-failed", "unstable"]: # not undo-able
                 raise
-            onfail = cfg.get("on_fail", "keep") # valid values: keep, destroy, rollback (destroy == scale-to-zero, not supported)
-            if onfail == "rollback":
+            onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
+            if onfail == "rollback" or onfail == "destroy_new":
                 try:
-                    subprocess.call(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n))
+                    subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                     print("UNDONE", file=sys.stderr)
-                except subprocess.CalledProcessError:
+                    dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'rollback')
+                except subprocess.CalledProcessError as se:
                     # progress msg with warning TODO
                     print("undo for {} failed: {}".format(n, e), file=sys.stderr)
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                except AdjustError as se:
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                except Exception as se:
+                    e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                    raise
+                else:
+                    e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
+            if onfail == "destroy":
+                try:
+                    destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
+                    print("DESTROYED", file=sys.stderr)
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'destroy')
+                except subprocess.CalledProcessError as se:
+                    # progress msg with warning TODO
+                    print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                except AdjustError as se:
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                except Exception as se:
+                    e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                    raise
+                else:
+                    e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
             raise
         patched_count = patched_count+1
 
 # spec_id and version_id should be tested without settlement_time, too - TODO
 
     # post-adjust settlement, if enabled
-    testdata0, raw = raw_query(appname, desc)
-    settlement_time = cfg.get("settlement", 0)
+    testdata0, raw, _ = raw_query(appname, desc, pod_debug=True)
+    settlement_time = cfg.get("settlement", desc.get("settlement", 0))
+    refapp = cfg.get("userdata", {}).get("deployment", None)
     mon0 = testdata0["monitoring"]
 
     if "ref_version_id" in mon0 and mon0["version_id"] != mon0["ref_version_id"]:
@@ -821,27 +896,106 @@ def update(appname, desc, data, print_progress):
         return {"monitoring":mon0, "status":"ok", "reason":"success"}
 
 # TODO: adjust progress accounting when there is settlement_time!=0
-
     # wait and watch the app, checking for changes
-    w = Waiter(settlement_time, delay=min(settlement_time, 30)) # NOTE: delay between tests may be made longer than the delay between progress reports
-    while w.wait():
-        testdata, raw = raw_query(appname, desc)
-        mon = testdata["monitoring"]
-        # compare to initial mon data set
-        if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
-            # TODO: allow limited number of restarts? (and how to distinguish from rejected/unstable??)
-            raise AdjustError("component(s) restart detected", status="transient-failure", reason="app-restart")
-# TODO: what to do with version change?
-#        if mon["version_id"] != mon0["version_id"]:
-#            raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
-        if mon["spec_id"] != mon0["spec_id"]:
-            raise AdjustError("application configuration was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
-        if mon["ref_spec_id"] != mon0["ref_spec_id"]:
-            raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
-        if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
-            raise AdjustError("", status="transient-failure", reason="ref-app-scale")
+    w = Waiter(settlement_time, delay=min(settlement_time, 5)) # NOTE: delay between tests may be made longer than the delay between progress reports
+    m = "waiting for k8s settlement"
+    try:
+        while w.wait():
+            print_progress(99, m)
+            testdata, raw, restart_counts = raw_query(appname, desc, pod_debug=True)
+            # check for container restart
+            restarted_containers = {}
+            for dep_name, restarts_list in restart_counts.items():
+                cur_conts = { v['pod+container']: v['restartCount'] for v in restarts_list if v['restartCount'] > 0 }
+                if cur_conts:
+                    restarted_containers[dep_name] = cur_conts
+
+            if restarted_containers:
+                raise AdjustError("during settlement; component(s) crash restart detected. Restarted deployments {{pod+container: restartCount}}: {}".format(
+                        ', '.join( '{} {}'.format(k, v) for k, v in restarted_containers.items() )),
+                    status="rejected", reason="unstable")
+
+            mon = testdata["monitoring"]
+            # compare to initial mon data set
+            if mon["runtime_id"] != mon0["runtime_id"]: # restart detected
+                raise AdjustError("during settlement; component(s) intentional restart detected", status="transient-failure", reason="app-restart")
+            # TODO: what to do with version change?
+            # if mon["version_id"] != mon0["version_id"]:
+            #     raise AdjustError("application was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
+            if mon["spec_id"] != mon0["spec_id"]:
+                raise AdjustError("application configuration was modified unexpectedly during settlement", status="transient-failure", reason="app-update")
+
+            if refapp:
+                if mon["ref_spec_id"] != mon0["ref_spec_id"]:
+                    raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
+                if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
+                    raise AdjustError("reference application replicas count changed unexpectedly during settlement", status="transient-failure", reason="ref-app-scale")
+        
+        # Final readiness check
+        unready_dep_pods = {}
+        for n in patchlst.keys():
+            dep = k_get(appname, DEPLOYMENT+"/"+n)
+            sel = dep["spec"]["selector"]["matchLabels"]
+            sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
+
+            rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+            latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+
+            pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
+            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+            
+            unready_pods = [p['metadata']['name'] for p in pods if any( cs['ready'] == False for cs in p['status'].get('containerStatuses', []) )]
+            if unready_pods:
+                unready_dep_pods[n] = unready_pods
+
+        if unready_dep_pods:
+            raise AdjustError("Deployment pods not ready after settlement expired: {}".format(unready_dep_pods),
+                status="rejected", reason="unstable")
+
+    except AdjustError as e:
+        onfail = desc.get('on_fail', 'rollback') # valid values: nop, destroy, rollback (destroy == scale-to-zero)
+        if onfail == "rollback":
+            try:
+                for n in patchlst.keys():
+                    subprocess.run(kubectl(appname, "rollout", "undo", DEPLOYMENT+"/"+n), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                    dep_r = k_get(appname, DEPLOYMENT+"/"+n) # Get deployment after rollback for latest generation
+                    wait_for_update(appname, n, dep_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'settlement rollback')
+                print("UNDONE", file=sys.stderr)
+            except subprocess.CalledProcessError as se:
+                # progress msg with warning TODO
+                print("undo for {} failed: {}".format(n, se), file=sys.stderr)
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+            except AdjustError as se:
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+            except Exception as se:
+                e.args = tuple([e.args[0]  + '. Rollback failed: {}'.format(se)]) + e.args[1:]
+                raise
+            else:
+                e.args = tuple([e.args[0]  + '. Rollback succeeded']) + e.args[1:]
+        if onfail == "destroy" or onfail == "destroy_new":
+            try:
+                for n in patchlst.keys():
+                    destroy_r = k_patch(appname, DEPLOYMENT, n, '{ "spec": { "replicas": 0 } }')
+                    wait_for_update(appname, n, destroy_r["metadata"]["generation"], print_progress, patched_count, len(patchlst), cfg.get("timeout", 630), 'settlement destroy')
+                print("DESTROYED", file=sys.stderr)
+            except subprocess.CalledProcessError as se:
+                # progress msg with warning TODO
+                print("destroy for {} failed: {}".format(n, e), file=sys.stderr)
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+            except AdjustError as se:
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+            except Exception as se:
+                e.args = tuple([e.args[0]  + '. Destroy failed: {}'.format(se)]) + e.args[1:]
+                raise
+            else:
+                e.args = tuple([e.args[0]  + '. Destroy succeeded']) + e.args[1:]
+        # if e.status != 'rejected':
+        raise
+
+
 
     # update() return
+    return {"monitoring":mon0, "status":"ok", "reason":"success"}
 
 
 # cancel not supported
