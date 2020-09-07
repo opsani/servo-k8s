@@ -680,9 +680,9 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
 def set_rsrc(cont, cp, sn, sv, sel='both'):
     rn = RESOURCE_MAP[sn]
     if sn == "mem":
-        sv = str(round(sv,3)) + 'Gi'     # internal memory representation is in GiB
+        sv = str(round(sv,5)) + 'Gi'     # internal memory representation is in GiB
     else:
-        sv = str(round(sv,3))
+        sv = str(round(sv,5))
 
     if sel == 'request':
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
