@@ -573,6 +573,8 @@ def test_dep_progress(dep):
     sel = dep["spec"]["selector"]["matchLabels"]
     sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
     rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
+    rs = [x for x in rs if len(x['metadata']['ownerReferences']) == 1 and x['metadata']['ownerReferences'][0]['uid'] == dep['metadata']['uid']]
+
     latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
     rs_status = latest_rs["status"]
 
@@ -930,7 +932,7 @@ def update(appname, desc, data, print_progress):
                     raise AdjustError("reference application configuration was modified unexpectedly during settlement", status="transient-failure", reason="ref-app-update")
                 if mon["ref_runtime_count"] != mon0["ref_runtime_count"]:
                     raise AdjustError("reference application replicas count changed unexpectedly during settlement", status="transient-failure", reason="ref-app-scale")
-        
+
         # Final readiness check
         unready_dep_pods = {}
         for n in patchlst.keys():
@@ -943,7 +945,7 @@ def update(appname, desc, data, print_progress):
 
             pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
             pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
-            
+
             unready_pods = [p['metadata']['name'] for p in pods if any( cs['ready'] == False for cs in p['status'].get('containerStatuses', []) )]
             if unready_pods:
                 unready_dep_pods[n] = unready_pods
