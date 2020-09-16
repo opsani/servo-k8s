@@ -408,8 +408,8 @@ def raw_query(appname, desc, pod_debug=False):
         imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
         comp = comps[full_comp_name] = comps[full_comp_name] or {}
         settings = comp["settings"] = comp.setdefault("settings", {}) or {}
-        read_mem = not settings or 'mem' in settings
-        read_cpu = not settings or 'cpu' in settings
+        read_mem = settings and 'mem' in settings
+        read_cpu = settings and 'cpu' in settings
         read_replicas = not settings or 'replicas' in settings
         res = cont.get("resources")
         if res:
@@ -573,7 +573,9 @@ def test_dep_progress(dep):
     sel = dep["spec"]["selector"]["matchLabels"]
     sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
     rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
-    rs = [x for x in rs if len(x['metadata']['ownerReferences']) == 1 and x['metadata']['ownerReferences'][0]['uid'] == dep['metadata']['uid']]
+    dep_rs = [x for x in rs if any(y['uid'] == dep.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
+    if not dep_rs:
+        raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
 
     latest_rs = max(rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
     rs_status = latest_rs["status"]
