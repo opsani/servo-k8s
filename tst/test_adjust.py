@@ -250,3 +250,59 @@ def test_adjust_destroy_new():
     finally:
       cleanup_deployment(dep)
       run('kubectl delete service test-adjust-destroy-new')
+
+def test_adjust_conflicting_rs_labels():
+    """
+    The following deployments have conflicting labels which cuased a failure in older driver versions
+    """
+    dep = """
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: {name}
+    spec:
+      replicas: {replicas}
+      selector:
+        matchLabels: {{ app: nginx{addLabel} }}
+      template:
+        metadata:
+          labels: {{ app: nginx{addLabel} }}
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.7.9
+            ports:
+            - containerPort: 80
+            resources:
+              requests:
+                cpu: "250m"
+                memory: "256Mi"
+              limits:
+                cpu: "250m"
+                memory: "256Mi"
+    """
+    cfg = """
+    k8s:
+      application:
+        components:
+          {name}:
+            settings:
+              mem:
+                min: .125
+                max: .5
+                step: .125
+    """
+    can_dep = dep.format(name='nginx-canary', replicas='1', addLabel=', role: canary')
+    main_dep = dep.format(name='nginx-main', replicas='2', addLabel='')
+    setup_deployment(can_dep)
+    setup_deployment(main_dep)
+
+    try:
+      adjust_dep(cfg.format(name='nginx-canary'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-canary': {'settings': {'mem': {'value': .125}}}}}}) # can dep revision 2
+      adjust_dep(cfg.format(name='nginx-canary'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-canary': {'settings': {'mem': {'value': .25}}}}}}) # can dep revision 3
+      adjust_dep(cfg.format(name='nginx-main'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-main': {'settings': {'mem': {'value': .125}}}}}}) # actual test, main_dep revision 2
+    except:
+      raise
+    finally:
+      cleanup_deployment(can_dep)
+      cleanup_deployment(main_dep)
