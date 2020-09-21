@@ -27,11 +27,13 @@ jobs:
       run: |
         bento --agree --email=linkous8@gmail.com check --all 2>&1 | cat
 
-    - name: Setup test folder
+    - name: Setup main folder
       working-directory: ./
-      run: |
-        curl --remote-name https://raw.githubusercontent.com/opsani/servo/master/adjust.py
-        mkdir encoders
+      run: curl --remote-name https://raw.githubusercontent.com/opsani/servo/master/adjust.py
+
+    - name: Setup test folder
+      working-directory: ./tst
+      run: mkdir encoders
 
     - name: Setup test encoders folder
       working-directory: ./tst/encoders
