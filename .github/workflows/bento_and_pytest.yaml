@@ -20,11 +20,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Install Bento
+      run: pip install bento-cli && bento --version
+
     - name: Lint with Bento
       run: |
-        pip install bento-cli
-        bento --agree --email=test@test.com init
-        bento --agree --email=test@test.com check --all 2>&1
+        bento --agree --email=linkous8@gmail.com check --all 2>&1 | cat
 
     - name: Setup test folder
       working-directory: ./tst

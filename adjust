@@ -717,7 +717,8 @@ def update(appname, desc, data, print_progress):
 
     if adjust_on:
         try:
-            should_adjust = eval(adjust_on, {'__builtins__': None}, {"data": data})
+            # nosec: ast.literal_eval would not work here and the eval has been constrained
+            should_adjust = eval(adjust_on, {'__builtins__': None}, {"data": data}) # nosec
         except:
             should_adjust = False
         if not should_adjust:

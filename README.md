@@ -156,9 +156,10 @@ Under the current implementation, encoded settings are injected into the target 
 variable that defines the encoder (such as `JAVA_OPTS` in the example config below). The configuration for the
 encoded env has no `type`; it instead specifies an `encoder` dictionary whose key values are `name`, the file name of
 the encoder to be invoked (sans the `.py` extension), and `settings`, a dictionary whose values are dependent on the
-encoder being used (see encoder documentation for encoder settings config format). For example, a common use case
-of the servo-k8s connector is to [encode Java settings](https://github.com/opsani/encoder-jvm) into a `JAVA_OPTS` 
-environment variable. Here is an example of such a config:
+encoder being used. However, most encoders implement sane defaults for their settings' `min`, `max`, and `step` making 
+their configuration optional in most cases  (see encoder documentation for encoder settings config format). For example,
+a common use case of the servo-k8s connector is to [encode Java settings](https://github.com/opsani/encoder-jvm) into a
+`JAVA_OPTS` environment variable. Here is an example of such a config:
 
 ```yaml
 k8s:
