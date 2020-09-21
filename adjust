@@ -285,6 +285,27 @@ def get_rsrc(desc_settings, cont_resources, sn):
                 val = "0"
     return val
 
+def get_latest_rs(appname, labels, deployment):
+    rs = k_get(appname, ["-l", labels, "rs"])['items']
+    dep_rs = [x for x in rs if any(y['uid'] == deployment.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
+    if not dep_rs:
+        raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
+
+    return max(dep_rs, key=lambda r: int(r.get('metadata', {}).get('annotations', {}).get('deployment.kubernetes.io/revision', -1)))
+
+def get_latest_pods(appname, labels, replicaset, pod_debug=False):
+    if pod_debug:
+        output = subprocess.check_output(kubectl(appname, 'get', '-l', labels, "pods"))
+        print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
+    
+    pods = k_get(appname, ["-l", labels, "pods"])
+    return [
+        pod for pod in pods["items"] 
+        if any(
+            ownRef.get('uid') is not None 
+            and ownRef.get('uid') == replicaset.get('metadata', {}).get('uid')
+            for ownRef in pod.get('metadata', {}).get('ownerReferences', []))]
+
 def raw_query(appname, desc, pod_debug=False):
     """
     Read the list of deployments in a namespace and fill in data into desc.
@@ -380,17 +401,8 @@ def raw_query(appname, desc, pod_debug=False):
 
         # list of pods, for runtime_id
         try:
-            rs = k_get(appname, ["-l", sel, "rs"])['items']
-            dep_rs = [x for x in rs if any(y['uid'] == dep.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
-            if not dep_rs:
-                raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
-
-            latest_rs = max(dep_rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
-            if pod_debug:
-                output = subprocess.check_output(kubectl(appname, 'get', '-l', sel, "pods"))
-                print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
-            pods = k_get(appname, ["-l", sel, "pods"])
-            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+            latest_rs = get_latest_rs(appname=appname, labels=sel, deployment=dep)
+            pods = get_latest_pods(appname, sel, latest_rs, pod_debug)
             runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
             restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) ]
         except subprocess.CalledProcessError as e:
@@ -576,12 +588,7 @@ def test_dep_progress(dep):
 
     sel = dep["spec"]["selector"]["matchLabels"]
     sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
-    rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
-    dep_rs = [x for x in rs if any(y['uid'] == dep.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
-    if not dep_rs:
-        raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
-
-    latest_rs = max(dep_rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
+    latest_rs = get_latest_rs(dep['metadata']['namespace'], sel, dep)
     rs_status = latest_rs["status"]
 
     for co in dep_status["conditions"]:
@@ -613,8 +620,7 @@ def test_dep_progress(dep):
             progress = 0.99 # available/ready counts aren't there - don't report 100%, wait loop will contiune until ready or time out
 
     # check for pod restarts
-    pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
-    pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+    pods = get_latest_pods(dep['metadata']['namespace'], sel, latest_rs)
     if progress == 1.0 and spec_replicas == 0:
         progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
     restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) if cont_stat['restartCount'] > 0 ]
@@ -946,15 +952,8 @@ def update(appname, desc, data, print_progress):
             dep = k_get(appname, DEPLOYMENT+"/"+n)
             sel = dep["spec"]["selector"]["matchLabels"]
             sel = ','.join(("{}={}".format(k, v) for k, v in sel.items()))
-
-            rs = k_get(dep['metadata']['namespace'], ["-l", sel, "rs"])['items']
-            dep_rs = [x for x in rs if any(y['uid'] == dep.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
-            if not dep_rs:
-                raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
-            latest_rs = max(dep_rs, key=lambda r: int(r['metadata']['annotations']['deployment.kubernetes.io/revision']))
-
-            pods = k_get(dep['metadata']['namespace'], ["-l", sel, "pods"])
-            pods = [pod for pod in pods["items"] if any(ownRef['uid'] == latest_rs['metadata']['uid'] for ownRef in pod['metadata']['ownerReferences'])]
+            latest_rs = get_latest_rs(appname, sel, dep)
+            pods = get_latest_pods(appname, sel, latest_rs)
 
             unready_pods = [p['metadata']['name'] for p in pods if any( cs['ready'] == False for cs in p['status'].get('containerStatuses', []) )]
             if unready_pods:
