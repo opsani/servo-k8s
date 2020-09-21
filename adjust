@@ -287,7 +287,11 @@ def get_rsrc(desc_settings, cont_resources, sn):
 
 def get_latest_rs(appname, labels, deployment):
     rs = k_get(appname, ["-l", labels, "rs"])['items']
-    dep_rs = [x for x in rs if any(y['uid'] == deployment.get('metadata', {}).get('uid') for y in x.get('metadata', {}).get('ownerReferences', []))]
+    dep_rs = [
+        x for x in rs if any(
+            y.get('uid') is not None 
+            and y.get('uid') == deployment.get('metadata', {}).get('uid') 
+            for y in x.get('metadata', {}).get('ownerReferences', []))]
     if not dep_rs:
         raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
 
