@@ -1,0 +1,52 @@
+name: Run Bento and Pytests
+
+on: [push]
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python 3.8
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.8
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install Bento
+      run: pip install bento-cli && bento --version
+
+    - name: Lint with Bento
+      run: |
+        bento --agree --email=linkous8@gmail.com check --all 2>&1 | cat
+
+    - name: Setup main folder
+      working-directory: ./
+      run: curl --remote-name https://raw.githubusercontent.com/opsani/servo/master/adjust.py
+
+    - name: Setup encoders folder
+      working-directory: ./
+      run: mkdir encoders
+
+    - name: Setup test encoders folder
+      working-directory: ./encoders
+      run: |
+        curl --remote-name-all \
+        https://raw.githubusercontent.com/opsani/servo/master/encoders/base.py \
+        https://raw.githubusercontent.com/opsani/encoder-jvm/master/encoders/jvm.py
+
+    - name: Start Minikube Cluster
+      run: minikube start
+
+    - name: Test with pytest
+      working-directory: ./tst
+      run: |
+        pip install pytest requests-mock
+        pytest

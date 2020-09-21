@@ -49,7 +49,7 @@ def setcfg(fname):
 def run(cmd):
     """basic execution of a command, stdout and stderr are not redirected (end up in py.test logs), raise exception on errors"""
     # nosec below as test suite is not intended to run in production environment, invocations all use static input
-    return subprocess.check_output(cmd, shell=True)
+    return subprocess.check_output(cmd, shell=True) # nosec
 
 def silent(cmd):
     """run a command and ignore stdout/stderr and non-zero exit status"""
@@ -107,7 +107,8 @@ def copy_driver_files(tmpdirname, cfg):
         jvm_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'encoders', 'jvm.py'))
         jvm_dst = os.path.join(tmpdirname, 'encoders', 'jvm.py')
         shutil.copyfile(jvm_src, jvm_dst, follow_symlinks=True)
-    except:
+    except: # nosec
+        # nosec because encoders are optional, their absence should not disrupt the other tests
         pass
     # Copy adjust
     adjust_drv_src = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'adjust'))

@@ -120,17 +120,20 @@ def test_adjust_never_ready():
                 step: .125
     """
     setup_deployment(dep)
-    captured_error = None
     try:
-      adjust_dep(cfg, {'control': { 'timeout': 90 }, 'application': {'components': {'test-adjust-never-ready': {'settings': {'mem': {'value': .125}}}}}})
-    except Exception as e:
-      captured_error = e
+      captured_error = None
+      try:
+        adjust_dep(cfg, {'control': { 'timeout': 90 }, 'application': {'components': {'test-adjust-never-ready': {'settings': {'mem': {'value': .125}}}}}})
+      except Exception as e:
+        captured_error = e
 
-    assert captured_error is not None, 'Adjustment succeeded despite latest revision pods never becoming ready'
-    assert 'timed out waiting for replicas to come up' in str(captured_error), 'Adjustment error occurred but did not match the expected error. Error that occured: {}'.format(captured_error)
-    assert 'Rollback succeeded' in str(captured_error), 'The expected error occured but rollback failed. Error: {}'.format(captured_error)
-    
-    cleanup_deployment(dep)
+      assert captured_error is not None, 'Adjustment succeeded despite latest revision pods never becoming ready'
+      assert 'timed out waiting for replicas to come up' in str(captured_error), 'Adjustment error occurred but did not match the expected error. Error that occured: {}'.format(captured_error)
+      assert 'Rollback succeeded' in str(captured_error), 'The expected error occured but rollback failed. Error: {}'.format(captured_error)
+    except:
+      raise
+    finally:
+      cleanup_deployment(dep)
 
 def test_adjust_destroy_new():
     """
@@ -148,8 +151,8 @@ def test_adjust_destroy_new():
           app: test-adjust-destroy-new
       strategy:
         rollingUpdate:
-          maxSurge: 25%
-          maxUnavailable: 25%
+          maxSurge: 100%
+          maxUnavailable: 0%
         type: RollingUpdate
       template:
         metadata:
@@ -207,36 +210,99 @@ def test_adjust_destroy_new():
     time.sleep(40) # let initial dep become ready before testing url
     run('kubectl expose deployment test-adjust-destroy-new --type=LoadBalancer --port=8080')
     url = run('minikube service test-adjust-destroy-new --url')
+    time.sleep(15) # give time for service to come up
 
-    connection_error = None
-    def test_url():
-      nonlocal connection_error
-      try:
-        resp = requests.get(url)
-      except requests.ConnectionError as e:
-        connection_error = 'Test deployment became unreachable: {}'.format(e)
-      else:
-        if not resp.ok:
-          connection_error = 'Test deployment became unreachable, status {}: {}'.format(resp.status_code, resp.text)
+    try:
+      connection_error = None
+      def test_url():
+        nonlocal connection_error
+        try:
+          resp = requests.get(url)
+        except requests.ConnectionError as e:
+          connection_error = 'Test deployment became unreachable: {}'.format(e)
+        else:
+          if not resp.ok:
+            connection_error = 'Test deployment became unreachable, status {}: {}'.format(resp.status_code, resp.text)
+        timer = Timer(1, test_url)
+        timer.daemon = True
+        timer.start()
+
       timer = Timer(1, test_url)
       timer.daemon = True
       timer.start()
 
-    timer = Timer(1, test_url)
-    timer.daemon = True
-    timer.start()
+      time.sleep(5) # verify connection of initial pod
+      assert connection_error is None, f"Pre-adjust: {connection_error}"
 
-    captured_error = None
+      captured_error = None
+      try:
+        adjust_dep(cfg, {'application': {'components': {'test-adjust-destroy-new': {'settings': {'mem': {'value': .125}}}}}})
+      except Exception as e:
+        captured_error = e
+
+      assert captured_error is not None, 'Adjustment succeeded despite latest revision pods never becoming ready'
+      assert 'during rollout; component(s) crash restart detected' in str(captured_error), 'Adjustment error occurred but did not match the expected error. Error that occured: {}'.format(captured_error)
+      assert 'Rollback succeeded' in str(captured_error), 'The expected error occured but rollback failed. Error: {}'.format(captured_error)
+
+      assert connection_error is None, connection_error
+    except:
+      raise
+    finally:
+      cleanup_deployment(dep)
+      run('kubectl delete service test-adjust-destroy-new')
+
+def test_adjust_conflicting_rs_labels():
+    """
+    The following deployments have conflicting labels which cuased a failure in older driver versions
+    """
+    dep = """
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: {name}
+    spec:
+      replicas: {replicas}
+      selector:
+        matchLabels: {{ app: nginx{addLabel} }}
+      template:
+        metadata:
+          labels: {{ app: nginx{addLabel} }}
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:1.7.9
+            ports:
+            - containerPort: 80
+            resources:
+              requests:
+                cpu: "250m"
+                memory: "256Mi"
+              limits:
+                cpu: "250m"
+                memory: "256Mi"
+    """
+    cfg = """
+    k8s:
+      application:
+        components:
+          {name}:
+            settings:
+              mem:
+                min: .125
+                max: .5
+                step: .125
+    """
+    can_dep = dep.format(name='nginx-canary', replicas='1', addLabel=', role: canary')
+    main_dep = dep.format(name='nginx-main', replicas='2', addLabel='')
+    setup_deployment(can_dep)
+    setup_deployment(main_dep)
+
     try:
-      adjust_dep(cfg, {'application': {'components': {'test-adjust-destroy-new': {'settings': {'mem': {'value': .125}}}}}})
-    except Exception as e:
-      captured_error = e
-
-    assert captured_error is not None, 'Adjustment succeeded despite latest revision pods never becoming ready'
-    assert 'during rollout; component(s) crash restart detected' in str(captured_error), 'Adjustment error occurred but did not match the expected error. Error that occured: {}'.format(captured_error)
-    assert 'Rollback succeeded' in str(captured_error), 'The expected error occured but rollback failed. Error: {}'.format(captured_error)
-
-    assert connection_error is None, connection_error
-    
-    cleanup_deployment(dep)
-    run('kubectl delete service test-adjust-destroy-new')
+      adjust_dep(cfg.format(name='nginx-canary'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-canary': {'settings': {'mem': {'value': .125}}}}}}) # can dep revision 2
+      adjust_dep(cfg.format(name='nginx-canary'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-canary': {'settings': {'mem': {'value': .25}}}}}}) # can dep revision 3
+      adjust_dep(cfg.format(name='nginx-main'), {'control': { 'timeout': 90 }, 'application': {'components': {'nginx-main': {'settings': {'mem': {'value': .125}}}}}}) # actual test, main_dep revision 2
+    except:
+      raise
+    finally:
+      cleanup_deployment(can_dep)
+      cleanup_deployment(main_dep)
