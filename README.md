@@ -149,6 +149,33 @@ rules:
   verbs: ["get", "list", "watch" ]
 ```
 
+## Using an Encoder
+
+Like many other connectors, servo-k8s supports the usage of encoders for language specific settings.
+Under the current implementation, encoded settings are injected into the target container via the environment
+variable that defines the encoder (such as `JAVA_OPTS` in the example config below). The configuration for the
+encoded env has no `type`; it instead specifies an `encoder` dictionary whose key values are `name`, the file name of
+the encoder to be invoked (sans the `.py` extension), and `settings`, a dictionary whose values are dependent on the
+encoder being used (see encoder documentation for encoder settings config format). For example, a common use case
+of the servo-k8s connector is to [encode Java settings](https://github.com/opsani/encoder-jvm) into a `JAVA_OPTS` 
+environment variable. Here is an example of such a config:
+
+```yaml
+k8s:
+  application:
+    components:
+      test-encoder-adjust-env-var:
+        env:
+          JAVA_OPTS:
+            encoder:
+              name: jvm
+              settings:
+                GCTimeRatio:
+                  min: 9
+                  max: 99
+                  step: 10
+```
+
 ## Running the tests
 
 The tests are meant to be run by `pytest`. The Python3 version is required, it can be installed with
