@@ -28,7 +28,7 @@ jobs:
         bento --agree --email=linkous8@gmail.com check --all 2>&1 | cat
 
     - name: Setup test folder
-      working-directory: ./tst
+      working-directory: ./
       run: |
         curl --remote-name https://raw.githubusercontent.com/opsani/servo/master/adjust.py
         mkdir encoders
