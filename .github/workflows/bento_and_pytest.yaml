@@ -38,7 +38,7 @@ jobs:
       run: |
         curl --remote-name-all \
         https://raw.githubusercontent.com/opsani/servo/master/encoders/base.py \
-        https://https://raw.githubusercontent.com/opsani/encoder-jvm/master/encoders/jvm.py
+        https://raw.githubusercontent.com/opsani/encoder-jvm/master/encoders/jvm.py
 
     - name: Start Minikube Cluster
       run: minikube start
