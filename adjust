@@ -365,9 +365,10 @@ def raw_query(appname, desc, pod_debug=False):
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
     for full_comp_name in comps.keys():
-        dep_name = full_comp_name
-        cont_name = None
-        if '/' in dep_name:
+        comp = comps[full_comp_name] = comps[full_comp_name] or {}
+        dep_name = comp.get('deployment', full_comp_name)
+        cont_name = comp.get('container')
+        if '/' in full_comp_name:
             dep_name, cont_name = full_comp_name.split('/')
         assert dep_name in deps_dict, 'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
             ''.format(dep_name, full_comp_name, appname)
@@ -426,7 +427,6 @@ def raw_query(appname, desc, pod_debug=False):
         # FIXME: what to do if there's no mem reserve or limits defined? (a namespace can have a default mem limit, but that's not necessarily set, either)
         # (for now, we give the limit as 0, treated as 'unlimited' - AFAIK)
         imgs[full_comp_name] = cont["image"] # FIXME, is this always defined?
-        comp = comps[full_comp_name] = comps[full_comp_name] or {}
         settings = comp["settings"] = comp.setdefault("settings", {}) or {}
         read_mem = settings and 'mem' in settings
         read_cpu = settings and 'cpu' in settings
@@ -760,9 +760,9 @@ def update(appname, desc, data, print_progress):
         comp_desc = desc['application']['components'].get(comp_name) or {}
 
         # find deployment name and container name, and verify it's existence
-        cont_name = None
-        dep_name = comp_name
-        if '/' in dep_name:
+        cont_name = comp_desc.get('container')
+        dep_name = comp_desc.get('deployment', comp_name)
+        if '/' in comp_name:
             dep_name, cont_name = comp_name.split('/', 1)
         if dep_name not in raw:
             raise AdjustError(

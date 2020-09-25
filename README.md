@@ -38,6 +38,20 @@ that you want to optimize in your cluster. In case you specify just `deploymentN
 component, only the first container from a list of containers from a result of a command
 `kubectl get deployment/deploymentName -o json` will be used.
 
+EXPERIMENTAL: When `deployment` is specified in the config at the same level as `settings`, the component name will become an arbitrary label 
+(so long as it does not contain the slash `/` character). Further, `container` may also be specified in the config. Eg:
+
+```yaml
+...
+        application:
+            components:
+                nginx_frontend:
+                    deployment: nginx
+                    container: frontend
+                    settings:
+                        ...
+```
+
 The driver supports tuning of the number of replicas for the deployment as well as the limits and requests for the CPU
 and memory resources of the target container. These settings should be specified under the `settings` key for
 each desired deployment (see the example below). By default, the container resource requests and limits are both tuned to the same
