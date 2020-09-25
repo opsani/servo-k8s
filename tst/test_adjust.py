@@ -19,31 +19,6 @@ rep2 = {
 }
 
 def test_adjust(simple_app):
-    """test adjust command"""
-
-    dep = """
-    apiVersion: apps/v1
-    kind: Deployment
-    metadata:
-      name: nginx-deployment
-    spec:
-      replicas: 3
-      selector:
-        matchLabels:
-          app: nginx
-      template:
-        metadata:
-          labels:
-            app: nginx
-        spec:
-          containers:
-          - name: nginx
-            image: nginx:1.7.9
-            ports:
-            - containerPort: 80
-    """
-
-    setup_deployment(dep)
     time.sleep(15)
     setcfg("config_basic.yaml")
 
@@ -82,8 +57,6 @@ def test_adjust(simple_app):
     assert mon["version_id"] == mon2["version_id"]
     assert mon["ref_spec_id"] == mon2["ref_spec_id"]
     assert mon["ref_version_id"] == mon2["ref_version_id"]
-
-    cleanup_deployment(dep)
 
 def test_adjust_never_ready():
     """
