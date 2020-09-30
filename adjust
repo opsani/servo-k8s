@@ -625,6 +625,8 @@ def test_dep_progress(dep):
 
     # check for pod restarts
     pods = get_latest_pods(dep['metadata']['namespace'], sel, latest_rs)
+    if any(cont_stat.get('state', {}).get('waiting', {}).get('reason') == 'ImagePullBackOff' for p in pods for cont_stat in p['status'].get('containerStatuses', [])):
+        raise AdjustError("container image pull failure detected", status="failed", reason="image-pull-failed")
     if progress == 1.0 and spec_replicas == 0:
         progress = 1.0 if len(pods) == 0 else 0.99/len(pods)
     restart_counts = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) if cont_stat['restartCount'] > 0 ]
