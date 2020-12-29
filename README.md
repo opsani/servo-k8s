@@ -29,10 +29,9 @@ This driver also requires a configuration file named `config.yaml` to be present
 executable. The file must include a `k8s` configuration dictionary (Note: if the `OPTUNE_USE_DRIVER_NAME` environment
 variable is set to a truthy value, the name of the driver file will be used to locate the configuration dictionary instead).
 The configuration dictionary must define an `application` dictionary containing a `components` dictionary with the deployments
-(and optionally their particular containers) specified as component names. That way the driver will know which
-deployments to operate on.
+specified either as component names or within the `deployment` sub-config. That way the driver will know which deployments to operate on.
 
-The component name should be either of these two formats `deploymentName` or `deploymentName/containerName`.
+The deployment name should be either of these two formats `deploymentName` or `deploymentName/containerName`.
 The `deploymentName` and optionally `containerName` should reflect names of the deployment and the container
 that you want to optimize in your cluster. In case you specify just `deploymentName` in a name of a
 component, only the first container from a list of containers from a result of a command
@@ -81,40 +80,41 @@ afterward.
 Example `config.yaml` configuration file:
 
 ```yaml
-    k8s:
-        adjust_on: data["control"]["userdata"]["deploy_to"] == "canary" # Optional, if specified will adjust only if expression is true
-        on_fail: rollback # Behavior to enact on a failed adjustment, defaults to rollback. Valid options: 'destroy', 'rollback', and 'nop'
-        settlement: 300 # How long to monitor deployments before considering adjustment to be successful
-        application:
-            components:
-                nginx/frontend:
-                    settings:
-                        cpu:
-                            min: .125
-                            max: 2
-                            step: .125
-                        mem:
-                            min: .5
-                            max: 8
-                            step: .125
-                            selector: request
-                        replicas:
-                            min: 3
-                            max: 15
-                            step: 1
-                    env:
-                        COMMIT_DELAY:
-                            type: range
-                            min: 1
-                            max: 100
-                            step: 1
-                            default: 20
-                nginx/backend:
-                    settings:
-                        cpu:
-                            pinned: True # Optional
-                        mem:
-                            pinned: True # Optional
+k8s:
+  adjust_on: data["control"]["userdata"]["deploy_to"] == "canary" # Optional, if specified will adjust only if expression is true
+  on_fail: rollback # Behavior to enact on a failed adjustment, defaults to rollback. Valid options: 'destroy', 'rollback', and 'nop'
+  settlement: 300 # How long to monitor deployments before considering adjustment to be successful
+  application:
+    components:
+      front: # Component name
+        deployment: nginx/frontend # Deployment name
+        settings:
+          cpu:
+            min: .125
+            max: 2
+            step: .125
+          mem:
+            min: .5
+            max: 8
+            step: .125
+            selector: request
+          replicas:
+            min: 3
+            max: 15
+            step: 1
+        env:
+          COMMIT_DELAY:
+            type: range
+            min: 1
+            max: 100
+            step: 1
+            default: 20
+      nginx/backend: # Component name AND deployment name
+        settings:
+          cpu:
+            pinned: True # Optional
+          mem:
+            pinned: True # Optional
 ```
 
 To exclude a deployment from tuning, set `optune.ai/exclude` label to `'1'`. If you include the driver in the
