@@ -169,7 +169,8 @@ def read_desc():
     for name, comp in comps.items():
         settings = comp.get('settings', {})
         if 'replicas' in settings:
-            dep_name = name.split('/')[0] # if no '/', this just gets the whole name
+            dep_name = comp.get('deployment', name)
+            dep_name = dep_name.split('/')[0] # if no '/', this just gets the whole name
             replicas_tracker.setdefault(dep_name, 0)
             replicas_tracker[dep_name] += 1
 
@@ -289,9 +290,10 @@ def get_latest_rs(appname, labels, deployment):
     rs = k_get(appname, ["-l", labels, "rs"])['items']
     dep_rs = [
         x for x in rs if any(
-            y.get('uid') is not None 
-            and y.get('uid') == deployment.get('metadata', {}).get('uid') 
-            for y in x.get('metadata', {}).get('ownerReferences', []))]
+                y.get('uid') is not None 
+                and y.get('uid') == deployment.get('metadata', {}).get('uid') 
+            for y in x.get('metadata', {}).get('ownerReferences', []))
+    ]
     if not dep_rs:
         raise AdjustError('Unable to locate replicaset(s) for deployment. Found replica_sets: {}'.format(rs))
 
@@ -364,8 +366,8 @@ def raw_query(appname, desc, pod_debug=False):
     restart_counts = {}
     # ?? TODO: is it possible to have an item in 'd' with "kind" other than "Deployment"? (likely no)
     #          is it possible to have replicas == 0 (and how do we represent that, if at all)
-    for full_comp_name in comps.keys():
-        dep_name = full_comp_name
+    for full_comp_name, comp_data in comps.items():
+        dep_name = comp_data.get('deployment', full_comp_name)
         cont_name = None
         if '/' in dep_name:
             dep_name, cont_name = full_comp_name.split('/')
@@ -761,7 +763,7 @@ def update(appname, desc, data, print_progress):
 
         # find deployment name and container name, and verify it's existence
         cont_name = None
-        dep_name = comp_name
+        dep_name = comp_data.get('deployment', comp_name)
         if '/' in dep_name:
             dep_name, cont_name = comp_name.split('/', 1)
         if dep_name not in raw:
