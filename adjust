@@ -8,6 +8,7 @@ import os
 import errno
 import subprocess
 import time
+import datetime
 
 from collections.abc import Iterable
 
@@ -34,6 +35,7 @@ DEPLOYMENT = "deployment"
 # DEPLOYMENT = "deployment.v1.apps"  # new, not supported in 1.8 (it has v1beta1)
 RESOURCE_MAP = {"mem": "memory", "cpu": "cpu"}
 
+EXCLUDE_FROM_QUERY = ["driver", "update_annotation"]
 
 class ConfigError(Exception): # user-provided descriptor not readable
     pass
@@ -178,6 +180,10 @@ def read_desc():
         rotten_deps = map(lambda d: d[0], filter(lambda c: c[1] > 1, replicas_tracker.items()))
         raise Exception('Some components have more than one setting "replicas" defined. Specifically: {}. '
                         'Please, keep only one "replicas" per deployment.'.format(', '.join(rotten_deps)))
+
+    ann_key = desc.get("update_annotation", None)
+    if ann_key is not None:
+        assert isinstance(ann_key, str), "'update_annotation' must have a string value"
 
     return desc
 
@@ -723,6 +729,12 @@ def _value(x):
     return x
 
 
+def add_meta(patch, key, data):
+    """add json-encoded data to 'metadata[key]' in patch"""
+    ma = patch.setdefault("metadata", {}).setdefault("annotations", {})
+    ma[key] = json_enc(data)
+
+
 def update(appname, desc, data, print_progress):
 
     adjust_on = desc.get("adjust_on", False)
@@ -757,6 +769,8 @@ def update(appname, desc, data, print_progress):
         settings = comp_data.get("settings", {})
         if not settings:
             continue
+        # copy of the settings in short form, for annotaion:
+        settings_ann = {name:_value(value) for name, value in settings.items()}
         patches = {}
         replicas = None
         comp_desc = desc['application']['components'].get(comp_name) or {}
@@ -831,6 +845,16 @@ def update(appname, desc, data, print_progress):
 
     if not patchlst:
         raise Exception('No components were defiend in a configuration file. Cannot proceed with an adjustment.')
+
+    # add update annotation, if configured
+    ann_key = desc.get("update_annotation", None)
+    if ann_key is not None:
+        if len(patchlst) == 1:
+            v = next(iter(patchlst.values()))
+            ts = datetime.datetime.utcnow().isoformat(timespec="seconds")+"Z"
+            add_meta(v, ann_key, {"resources": settings_ann, "time": ts})
+        else:
+            print("WARNING: no annotation added on update: 'update_annotation' is not compatible with multiple components", file=sys.stderr)
 
     # NOTE: optimization possible: apply all patches first, then wait for them to complete (significant if making many changes at once!)
 
@@ -1039,7 +1063,8 @@ class K8sAdjust(Adjust):
             desc = read_desc()
         except ConfigError as e:
             raise AdjustError(str(e), reason="unknown") # maybe we should introduce reason=config (or even a different status class, instead of 'failed')
-        desc.pop("driver", None)
+        for k in EXCLUDE_FROM_QUERY:
+            desc.pop(k, None)
         namespace = os.environ.get('OPTUNE_NAMESPACE', desc.get('namespace', self.app_id))
         r = query(namespace, desc)
         return r

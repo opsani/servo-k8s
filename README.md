@@ -77,6 +77,11 @@ The the following optional configurations may also be defined at the same level 
 considering an adjustment to be successful. Useful for when a pod passes the initial health check but fails some time
 afterward.
 
+- `update_annotation` - name of a deployment annotation to add when adjusting. If defined, this will cause the driver to
+   add an annotation containing the application settings and the update time packed into a JSON string, in the form similar to
+   `{"resources":{"cpu":0.125,"mem":0.25,"replicas":2},"time":"2020-12-30T21:24:50Z"}`. The option works only if the application
+   consists of a single component. If there are multiple components defined, a warning will be printed (and no annotation will be written).
+
 Example `config.yaml` configuration file:
 
 ```yaml
