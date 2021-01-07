@@ -862,7 +862,7 @@ def update(appname, desc, data, print_progress):
         if len(patchlst) == 1:
             v = next(iter(patchlst.values()))
             ts = datetime.datetime.utcnow().isoformat(timespec="seconds")+"Z"
-            add_pod_meta(v, ann_key, {"resources": settings_ann, "time": ts})
+            add_pod_meta(v, ann_key, {"settings": settings_ann, "time": ts})
         else:
             print("WARNING: no annotation added on update: 'update_annotation' is not compatible with multiple components", file=sys.stderr)
 
