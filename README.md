@@ -40,8 +40,16 @@ component, only the first container from a list of containers from a result of a
 The driver supports tuning of the number of replicas for the deployment as well as the limits and requests for the CPU
 and memory resources of the target container. These settings should be specified under the `settings` key for
 each desired deployment (see the example below). By default, the container resource requests and limits are both tuned to the same
-value. To modify this behaviour, include a `selector` with a value of `request` or `limit`, to exclusively tune the value for `requests`
-or `limits` respectively. Additionally, `cpu`, `mem`, and `replicas` settings support pinning
+value. To modify this behaviour, include one of the following `selector` behaviors:
+
+* `both` (default) - Tuning values are set on both `request` and `limit`
+* `request` - Tuning values will be set on the resource `request` section while the corresponding resource `limit` will be cleared
+* `limit` - Tuning values will be set on the resource `limit` section while the corresponding resource `request` will be cleared
+* `request_min_limit` - When set, the additional config `limit_min` (> 0) becomes required to inform the following behavior:
+  - `request` is always set to the tuning value
+  - `limit` is set to the greater of the following values: the tuning value, and the configured `limit_min`
+
+Additionally, `cpu`, `mem`, and `replicas` settings support pinning
 which exempts them from being adjusted by the backend while still reporting their values for the
 purpose of measurement.
 
@@ -102,7 +110,8 @@ k8s:
             min: .5
             max: 8
             step: .125
-            selector: request
+            selector: request_min_limit
+            limit_min: .25 # Required due to `selector` config
           replicas:
             min: 3
             max: 15
