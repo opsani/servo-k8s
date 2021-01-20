@@ -435,3 +435,107 @@ def test_adjust_settings_mem_requests():
     desc = query_dep(cfg)
     assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .25
     cleanup_deployment(dep)
+
+
+def test_adjust_settings_cpu_request_min_limit():
+    dep = """
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: test-adjust-settings-cpu
+    spec:
+      selector:
+        matchLabels:
+          app: test-adjust-settings-cpu
+      template:
+        metadata:
+          labels:
+            app: test-adjust-settings-cpu
+        spec:
+          containers:
+            - name: main
+              image: alpine:latest
+              command: ["/bin/sh", "-c", "sleep 3600"]
+              resources:
+                limits:
+                  cpu: .3
+    """
+    cfg = """
+    k8s:
+      application:
+        components:
+          test-adjust-settings-cpu:
+            settings:
+              cpu:
+                min: .125
+                max: .5
+                selector: request_min_limit
+                limit_min: .2
+    """
+    setup_deployment(dep)
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-cpu': {'settings': {'cpu': {'value': .25}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-cpu']['settings']['cpu']['value'] == .25
+    # assert limit resource matches > limit_min adjust
+    all_deps = k_get('deployment')
+    dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-cpu')))
+    assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('cpu') == '250m'
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-cpu': {'settings': {'cpu': {'value': .125}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-cpu']['settings']['cpu']['value'] == .125
+    all_deps = k_get('deployment')
+    dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-cpu')))
+    assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('cpu') == '200m'
+    cleanup_deployment(dep)
+
+
+def test_adjust_settings_mem_request_min_limit():
+    dep = """
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: test-adjust-settings-mem
+    spec:
+      selector:
+        matchLabels:
+          app: test-adjust-settings-mem
+      template:
+        metadata:
+          labels:
+            app: test-adjust-settings-mem
+        spec:
+          containers:
+            - name: main
+              image: alpine:latest
+              command: ["/bin/sh", "-c", "sleep 3600"]
+              resources:
+                limits:
+                  memory: .25Gi
+    """
+    cfg = """
+    k8s:
+      application:
+        components:
+          test-adjust-settings-mem:
+            settings:
+              mem:
+                min: .125
+                max: .5
+                selector: request_min_limit
+                limit_min: .1875
+    """
+    setup_deployment(dep)
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .125}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .125
+    # assert non-selector resource is cleared
+    all_deps = k_get('deployment')
+    dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-mem')))
+    assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('memory') == '192Mi'
+    adjust_dep(cfg, {'application': {'components': {'test-adjust-settings-mem': {'settings': {'mem': {'value': .25}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['test-adjust-settings-mem']['settings']['mem']['value'] == .25
+    all_deps = k_get('deployment')
+    dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-mem')))
+    assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('memory') == '256Mi'
+    cleanup_deployment(dep)
