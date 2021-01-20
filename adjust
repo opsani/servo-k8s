@@ -717,26 +717,30 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
 
 def set_rsrc(cont, cp, sn, sv, desc_settings):
     rn = RESOURCE_MAP[sn]
-    if sn == "mem":
-        sv = str(round(sv,5)) + 'Gi'     # internal memory representation is in GiB
-    else:
-        sv = str(round(sv,5))
+    sv_str = rsrc_str(sn, sv)
 
     sel = desc_settings.get('selector', 'both')
     if sel == 'request':
-        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv_str
         if cont.get("resources", {}).get("limits", {}).get(rn) is not None:
             cp["resources"].setdefault("limits", {})[rn] = None # Remove corresponding limit if exists
     elif sel == 'limit':
-        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv_str
         if cont.get("resources", {}).get("requests", {}).get(rn) is not None:
             cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
     elif sel == 'request_min_limit':
-        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
-        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = max(sv, desc_settings['limit_min'])
+        lv = max(desc_settings['limit_min'], sv)
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv_str
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = rsrc_str(sn, lv)
     else: # both
-        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
-        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv_str
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv_str
+
+def rsrc_str(setting_name, value):
+    if setting_name == "mem":
+        return str(round(value,5)) + 'Gi'     # internal memory representation is in GiB
+    else:
+        return str(round(value,5))
 
 
 def _value(x):
