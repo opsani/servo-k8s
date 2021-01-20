@@ -170,6 +170,10 @@ def read_desc():
     replicas_tracker = {}
     for name, comp in comps.items():
         settings = comp.get('settings', {})
+        # sub-setting validation
+        validate_setting_configs(name, settings)
+        
+        # cross-component validation
         if 'replicas' in settings:
             dep_name = comp.get('deployment', name)
             dep_name = dep_name.split('/')[0] # if no '/', this just gets the whole name
@@ -186,6 +190,14 @@ def read_desc():
         assert isinstance(ann_key, str), "'update_annotation' must have a string value"
 
     return desc
+
+def validate_setting_configs(name, settings):
+    for k, v in settings.items():
+        if (k in ['mem', 'cpu']
+        and v.get('selector') == 'request_min_limit'
+        and not (v.get('limit_min', 0) > 0)):
+            err_str = "Component {name} configuration was malformed; limit_min > 0 required when selector == request_min_limit. Found: {val}"
+            raise ConfigError(err_str.format(name=name, val=v.get('limit_min')))
 
 def numval(v, minv, maxv, step=1.0, pinn=None):
     """shortcut for creating linear setting descriptions"""
@@ -268,7 +280,7 @@ def issetting(s):
 def get_rsrc(desc_settings, cont_resources, sn):
     rn = RESOURCE_MAP[sn]
     selector = desc_settings.get(sn, {}).get('selector', 'both')
-    if selector == 'request' or selector == 'both':
+    if selector in ['request', 'both', 'request_min_limit']:
         val = cont_resources.get("requests", {}).get(rn)
         if val is None:
             val = cont_resources.get("limits", {}).get(rn)
@@ -278,7 +290,7 @@ def get_rsrc(desc_settings, cont_resources, sn):
                     message='Using the non-selected value "limit" for resource "{}" as the selected value is not set'.format(sn))
             else:
                 val = "0"
-    else:
+    else: # selector == 'limit'
         val = cont_resources.get("limits", {}).get(rn)
         if val is None:
             val = cont_resources.get("requests", {}).get(rn)
@@ -703,13 +715,14 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
         err_text = 'during {}; {}'.format(phase, err)
     raise AdjustError(err_text, status=status, reason=reason)
 
-def set_rsrc(cont, cp, sn, sv, sel='both'):
+def set_rsrc(cont, cp, sn, sv, desc_settings):
     rn = RESOURCE_MAP[sn]
     if sn == "mem":
         sv = str(round(sv,5)) + 'Gi'     # internal memory representation is in GiB
     else:
         sv = str(round(sv,5))
 
+    sel = desc_settings.get('selector', 'both')
     if sel == 'request':
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
         if cont.get("resources", {}).get("limits", {}).get(rn) is not None:
@@ -718,6 +731,9 @@ def set_rsrc(cont, cp, sn, sv, sel='both'):
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
         if cont.get("resources", {}).get("requests", {}).get(rn) is not None:
             cp["resources"].setdefault("requests", {})[rn] = None # Remove corresponding request if exists
+    elif sel == 'request_min_limit':
+        cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
+        cp.setdefault("resources", {}).setdefault("limits", {})[rn] = max(sv, desc_settings['limit_min'])
     else: # both
         cp.setdefault("resources", {}).setdefault("requests", {})[rn] = sv
         cp.setdefault("resources", {}).setdefault("limits", {})[rn] = sv
@@ -835,7 +851,7 @@ def update(appname, desc, data, print_progress):
             value = _value(value) # compatibility: allow a scalar, but also work with {"value": {anything}}
             cont_patch = patches.setdefault(cont_name, {})
             if name in ("mem", "cpu"):
-                set_rsrc(tgt_container, cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}).get('selector', 'both'))
+                set_rsrc(tgt_container, cont_patch, name, value, comp_desc.get('settings', {}).get(name, {}))
                 continue
             elif name == "replicas":
                 replicas = int(value)
