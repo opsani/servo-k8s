@@ -809,7 +809,7 @@ def update(appname, desc, data, print_progress):
         cont_name = None
         dep_name = comp_data.get('deployment', comp_name)
         if '/' in dep_name:
-            dep_name, cont_name = comp_name.split('/', 1)
+            dep_name, cont_name = dep_name.split('/', 1)
         if dep_name not in raw:
             raise AdjustError(
                 'Cannot find deployment with name "{}" for component "{}" in namespace "{}"'.format(dep_name, comp_name, appname),
