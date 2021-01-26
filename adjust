@@ -388,7 +388,7 @@ def raw_query(appname, desc, pod_debug=False):
         dep_name = comp_data.get('deployment', full_comp_name)
         cont_name = None
         if '/' in dep_name:
-            dep_name, cont_name = full_comp_name.split('/')
+            dep_name, cont_name = dep_name.split('/')
         assert dep_name in deps_dict, 'Could not find deployment "{}" defined for component "{}" in namespace "{}".' \
             ''.format(dep_name, full_comp_name, appname)
         dep = deps_dict[dep_name]
