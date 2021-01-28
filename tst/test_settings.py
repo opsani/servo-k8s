@@ -539,3 +539,44 @@ def test_adjust_settings_mem_request_min_limit():
     dep_state = next(iter((i for i in all_deps['items'] if i['metadata']['name'] == 'test-adjust-settings-mem')))
     assert dep_state['spec']['template']['spec']['containers'][0]['resources'].get('limits', {}).get('memory') == '256Mi'
     cleanup_deployment(dep)
+
+def test_adjust_settings_deployment_config():
+    dep = """
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: test-adjust-settings-cpu
+    spec:
+      selector:
+        matchLabels:
+          app: test-adjust-settings-cpu
+      template:
+        metadata:
+          labels:
+            app: test-adjust-settings-cpu
+        spec:
+          containers:
+            - name: main
+              image: alpine:latest
+              command: ["/bin/sh", "-c", "sleep 3600"]
+              resources:
+                limits:
+                  cpu: .3
+    """
+    cfg = """
+    k8s:
+      application:
+        components:
+          canary:
+            deployment: test-adjust-settings-cpu/main
+            settings:
+              cpu:
+                min: .1
+                max: .5
+                step: .1
+    """
+    setup_deployment(dep)
+    adjust_dep(cfg, {'application': {'components': {'canary': {'settings': {'cpu': {'value': .2}}}}}})
+    desc = query_dep(cfg)
+    assert desc['application']['components']['canary']['settings']['cpu']['value'] == .2
+    cleanup_deployment(dep)
