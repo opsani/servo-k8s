@@ -807,7 +807,7 @@ def update(appname, desc, data, print_progress):
 
         # find deployment name and container name, and verify it's existence
         cont_name = None
-        dep_name = comp_data.get('deployment', comp_name)
+        dep_name = comp_desc.get('deployment', comp_name)
         if '/' in dep_name:
             dep_name, cont_name = dep_name.split('/', 1)
         if dep_name not in raw:
