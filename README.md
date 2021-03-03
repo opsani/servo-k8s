@@ -90,6 +90,9 @@ afterward.
    `{"settings":{"cpu":0.125,"mem":0.25,"replicas":2},"time":"2020-12-30T21:24:50Z"}`. The option works only if the application
    consists of a single component. If there are multiple components defined, a warning will be printed (and no annotation will be written).
 
+- `force_restart` (boolean, default=false) if set to true, all deployments controlled by the driver are forced to
+   re-start their pods, even if the adjustment made no changes to the settings.
+
 Example `config.yaml` configuration file:
 
 ```yaml
