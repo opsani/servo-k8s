@@ -29,7 +29,7 @@ CPU_STEP = 0.0125  # 1.25% of a core (even though 1 millicore is the highest res
 MAX_MEM = 4 * Gi  # bytes, may be overridden to higher limit
 MAX_CPU = 4.0  # cores
 # MAX_REPLICAS = 1000 # arbitrary, TBD
-FORCED_RESTART_ANN = "optune.ai/forceRestartAt" # pod annotation to set for forced restart
+FORCED_RESTART_ANN = "servo.opsani.com/forceRestartAt" # pod annotation to set for forced restart
 
 # the k8s obj to which we make queries/updates:
 DEPLOYMENT = "deployment"
