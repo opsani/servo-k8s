@@ -329,11 +329,11 @@ def get_latest_rs(appname, labels, deployment):
 
 def get_latest_pods(appname, labels, replicaset, pod_debug=False):
     if pod_debug:
-        output = subprocess.check_output(kubectl(appname, 'get', '-l', labels, "pods", "--output=json"))
+        output = subprocess.check_output(kubectl(appname, 'get', '-l', labels, "pods"))
         print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
 
     pods = k_get(appname, ["-l", labels, "pods"])
-    print('DEBUG pods2: \n{}'.format(repr([p['status'] for p in pods['items']])))
+    print('DEBUG pods2: \n{}'.format(repr([p['status'] for p in pods['items']])), file=sys.stderr)
     return [
         pod for pod in pods["items"]
         if any(
