@@ -437,7 +437,7 @@ def raw_query(appname, desc, pod_debug=False):
         try:
             latest_rs = get_latest_rs(appname=appname, labels=sel, deployment=dep)
             pods = get_latest_pods(appname, sel, latest_rs, pod_debug)
-            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods if pod["status"].get("phase") != "Terminating"]
             restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) ]
         except subprocess.CalledProcessError as e:
             # TODO: re-implement graceful failure
