@@ -333,6 +333,7 @@ def get_latest_pods(appname, labels, replicaset, pod_debug=False):
         print('DEBUG pods: \n{}'.format(output.decode('utf-8')), file=sys.stderr)
 
     pods = k_get(appname, ["-l", labels, "pods"])
+    print('DEBUG pods2: \n{}'.format(repr([p['status'] for p in pods['items']])))
     return [
         pod for pod in pods["items"]
         if any(
