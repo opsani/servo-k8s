@@ -437,7 +437,9 @@ def raw_query(appname, desc, pod_debug=False):
         try:
             latest_rs = get_latest_rs(appname=appname, labels=sel, deployment=dep)
             pods = get_latest_pods(appname, sel, latest_rs, pod_debug)
-            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in pods]
+            # NOTE: "Terminating" is not an actual phase on the pod status. More info here: https://github.com/kubernetes/kubernetes/issues/22839
+            non_terminating = [pod for pod in pods if not pod["metadata"].get("deletionTimestamp")]
+            runtime_ids[dep_name] = [pod["metadata"]["uid"] for pod in non_terminating]
             restart_counts[dep_name] = [ { 'pod+container': '{}+{}'.format(pod['metadata']['name'], cont_stat['name']), 'restartCount': cont_stat['restartCount'] } for pod in pods for cont_stat in pod['status'].get('containerStatuses', []) ]
         except subprocess.CalledProcessError as e:
             # TODO: re-implement graceful failure
