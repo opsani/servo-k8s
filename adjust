@@ -674,7 +674,7 @@ def test_dep_progress(dep):
 
 def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40, phase=''):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
-    wait_for_gen = 5 # time to wait for object update ('observedGeneration')
+    wait_for_gen = 15 # time to wait for object update ('observedGeneration')
     # wait_for_progress = 40 # time to wait for rollout to complete
 
     part = 1.0/float(t)
@@ -688,6 +688,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
     # --raw=''
     # GET /apis/apps/v1/namespaces/{namespace}/deployments
 
+    t0 = time.time()
     w = Waiter(wait_for_gen, 2)
     while w.wait():
         # NOTE: no progress prints here, this wait should be short
@@ -697,6 +698,7 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
         if test_dep_generation(r, patch_gen):
             break
 
+    print("DEBUG: waited {}s for k8s object update, expected g = {}, g now = {}".fomrat(time.time()-t0, patch_gen, r["status"]["observedGeneration"]), file=sys.stderr)
     if w.expired:
         raise AdjustError("update of {} failed, timed out waiting for k8s object update".format(obj), status="failed", reason="adjust-failed")
 
