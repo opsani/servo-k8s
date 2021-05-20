@@ -9,6 +9,7 @@ import errno
 import subprocess
 import time
 import datetime
+import hashlib
 
 from collections.abc import Iterable
 
@@ -54,7 +55,6 @@ def import_encoder_base():
 
 # === compute hash of arbitrary data struct
 # (copied inline from skopos/.../plugins/spec_hash_helper.py)
-import hashlib
 
 
 def _dbg(*data):
@@ -113,7 +113,7 @@ def kubectl(namespace, *args):
         cmd_args.append("--server=" + os.getenv("OPTUNE_K8S_SERVER"))
     if os.getenv("OPTUNE_K8S_TOKEN") is not None:
         cmd_args.append("--token=" + os.getenv("OPTUNE_K8S_TOKEN"))
-    if bool(os.getenv("OPTUNE_K8S_SKIP_TLS_VERIFY", False)):
+    if bool(int(os.getenv("OPTUNE_K8S_SKIP_TLS_VERIFY", "0"))):
         cmd_args.append("--insecure-skip-tls-verify=true")
     dbg_txt = "DEBUG: ns='{}', env='{}', r='{}', args='{}'".format(
         namespace, os.environ.get("OPTUNE_USE_DEFAULT_NAMESPACE", "???"), cmd_args, list(args)
@@ -230,7 +230,7 @@ def numval(v, minv, maxv, step=1.0, pinn=None):
     """shortcut for creating linear setting descriptions"""
     ret = {"value": v, "min": minv, "max": maxv, "step": step, "type": "range"}
     if pinn is not None:
-        ret["pinned"] = pinn == True
+        ret["pinned"] = bool(pinn)
     return ret
 
 
@@ -729,7 +729,6 @@ def test_dep_progress(dep):
     """
     dbg_log("test_dep_progress:")
     spec_replicas = dep["spec"]["replicas"]  # this is what we expect as target
-    error = None
     progress_final = None
     dep_status = dep["status"]
 
@@ -902,8 +901,7 @@ def set_rsrc(cont, cp, sn, sv, desc_settings):
 def rsrc_str(setting_name, value):
     if setting_name == "mem":
         return str(round(value, 5)) + "Gi"  # internal memory representation is in GiB
-    else:
-        return str(round(value, 5))
+    return str(round(value, 5))
 
 
 def _value(x):
@@ -934,7 +932,7 @@ def update(appname, desc, data, print_progress):
         try:
             # nosec: ast.literal_eval would not work here and the eval has been constrained
             should_adjust = eval(adjust_on, {"__builtins__": None}, {"data": data})  # nosec
-        except:
+        except Exception:
             should_adjust = False
         if not should_adjust:
             return {"status": "ok", "reason": "Skipped due to 'adjust_on' condition"}
@@ -1028,7 +1026,7 @@ def update(appname, desc, data, print_progress):
             if name in ("mem", "cpu"):
                 set_rsrc(tgt_container, cont_patch, name, value, comp_desc.get("settings", {}).get(name, {}))
                 continue
-            elif name == "replicas":
+            if name == "replicas":
                 replicas = int(value)
 
         patch = patchlst.setdefault(dep_name, {})
@@ -1113,7 +1111,7 @@ def update(appname, desc, data, print_progress):
             if e.reason not in ["start-failed", "unstable"]:  # not undo-able
                 raise
             onfail = desc.get("on_fail", "rollback")  # valid values: nop, destroy, rollback (destroy == scale-to-zero)
-            if onfail == "rollback" or onfail == "destroy_new":
+            if onfail in ("rollback", "destroy_new"):
                 try:
                     subprocess.run(
                         kubectl(appname, "rollout", "undo", DEPLOYMENT + "/" + n),
@@ -1260,7 +1258,7 @@ def update(appname, desc, data, print_progress):
             unready_pods = [
                 p["metadata"]["name"]
                 for p in pods
-                if any(cs["ready"] == False for cs in p["status"].get("containerStatuses", []))
+                if not all(cs["ready"] for cs in p["status"].get("containerStatuses", []))
             ]
             if unready_pods:
                 unready_dep_pods[n] = unready_pods
