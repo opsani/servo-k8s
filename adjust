@@ -708,8 +708,10 @@ class Waiter(object):
         return waiting
 
 
-def test_dep_generation(dep, g):
+def test_dep_generation(dep, g, ge=False):
     """check if the deployment status indicates it has been updated to the given generation number"""
+    if ge:
+        return dep["status"]["observedGeneration"] >= g
     return dep["status"]["observedGeneration"] == g
 
 
@@ -798,6 +800,58 @@ def test_dep_progress(dep):
     return (progress, "")
 
 
+def compare_settings(patch, dep):
+    """test select parts of a deployment patch against an actual deployment object,
+    return None if they match, or a string detailing the difference otherwise.
+    Only spec/template/spec/containers/:N:/resources/limits and .../resources/requests are compared. If a
+    patch has 'None' setting for a resource, the corresponding value is the deployment is not checked
+    (patching to None means 'delete', not sure if K8s deletes or sets to a default value in this case).
+    """
+    try:
+        p_containers = patch["spec"]["template"]["spec"]["containers"]
+    except KeyError:
+        # patch does not set any resource, return OK
+        return None
+    # KeyError here not caught (propagate as fatal error)
+    d_containers = dep["spec"]["template"]["spec"]["containers"]
+
+    # convert arrays to maps, for easy matching
+    p_containers = {x["name"]: x for x in p_containers}
+    d_containers = {x["name"]: x for x in d_containers}
+
+    # compare
+    for k, v in p_containers.items():
+        if not v.get("resources"):  # patch didn't set resources
+            continue
+        c = d_containers.get(k)
+        if not c or not c.get("resources"):  # patch has resources, but dep doesn't: mismatch
+            msg = "no resources in deployment for container '{}'".format(k)
+            print("compare_settings: " + msg, file=sys.stderr)
+            return msg
+        p_rsrc = v["resources"]
+        d_rsrc = c["resources"]
+        print("compare_settings: cname={}, comparing: {} <> {}".format(k, repr(p_rsrc), repr(d_rsrc)), file=sys.stderr)
+        for rtype, rd in p_rsrc.items():
+            for rname, rvalue in rd.items():
+                if rvalue is None:  # don't compare if patch says None
+                    continue
+                try:
+                    dep_rvalue = d_rsrc[rtype][rname]
+                except KeyError:  # patched value not present in dep - mismatch
+                    msg = "{}.{}.{}: no value".format(k, rtype, rname)
+                    print("compare_settings: " + msg, file=sys.stderr)
+                    return msg
+                if rname == "memory":
+                    r = memunits(rvalue) == memunits(dep_rvalue)
+                elif rname == "cpu":
+                    r = cpuunits(rvalue) == cpuunits(dep_rvalue)
+                if not r:
+                    msg = "compare_settings: {}.{}.{}: {}!={}".format(k, rtype, rname, rvalue, dep_rvalue)
+                    print("compare_settings: " + msg, file=sys.stderr)
+                    return msg
+    return None
+
+
 # FIXME: observed a patch trigger spontaneous reduction in replica count! (happened when update was attempted without replica count changes and 2nd replica was not schedulable according to k8s)
 # NOTE: update of 'observedGeneration' does not mean that the 'deployment' object is done updating; also checking readyReplicas or availableReplicas in status does not help (these numbers may be for OLD replicas, if the new replicas cannot be started at all). We check for a 'Progressing' condition with a specific 'reason' code as an indication that the deployment is fully updated.
 # The 'kubectl rollout status' command relies only on the deployment object - therefore info in it should be sufficient to track progress.
@@ -805,7 +859,7 @@ def test_dep_progress(dep):
 # FIXME: cpu request above 0.05 fails for 2 replicas on minikube. Not understood. (NOTE also that setting cpu_limit without specifying request causes request to be set to the same value, except if limit is very low - in that case, request isn't set at all)
 
 
-def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40, phase=""):
+def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_progress=40, phase="", cmp_=None):
     """wait for a patch to take effect. appname is the namespace, obj is the deployment name, patch_gen is the object generation immediately after the patch was applied (should be a k8s obj with "kind":"Deployment")"""
     wait_for_gen = 15  # time to wait for object update ('observedGeneration')
     # wait_for_progress = 40 # time to wait for rollout to complete
@@ -829,8 +883,9 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
         r = k_get(appname, DEPLOYMENT + "/" + obj)
         # ydump("tst_wait{}_output_{}.yaml".format(rc,obj),r) ; rc = rc+1
 
-        if test_dep_generation(r, patch_gen):
+        if test_dep_generation(r, patch_gen, ge=True):
             break
+    r0 = r
 
     if r:
         print(
@@ -860,6 +915,17 @@ def wait_for_update(appname, obj, patch_gen, print_progress, c=0, t=1, wait_for_
         print_progress(int((c + p) * part * 100), m)
         p, err = test_dep_progress(r)
         if p == 1.0:
+            if not test_dep_generation(r0, patch_gen) and cmp_:
+                # if generation did not match exactly, there has been another update besides ours,
+                # compare the configuration to the expected one and fail if a controlled setting was changed
+                print(
+                    "WARNING: detected concurrent update during adjust, re-checking settings",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                diff = compare_settings(cmp_, r)
+                if diff:
+                    raise AdjustError("deployment was modified unexpectedly: " + diff, reason="overwritten")
             return  # all done
         if err:
             break
@@ -1106,6 +1172,7 @@ def update(appname, desc, data, print_progress):
                 len(patchlst),
                 cfg.get("timeout", 630),
                 "rollout",
+                cmp_=v,
             )
         except AdjustError as e:
             if e.reason not in ["start-failed", "unstable"]:  # not undo-able
