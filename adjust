@@ -1023,13 +1023,13 @@ def update(appname, desc, data, print_progress):
         settings = comp_data.get("settings", {})
         if not settings:
             continue
-        # copy of the settings in short form, for annotaion:
+        # copy of the settings in short form, for annotation:
         settings_ann = {name: _value(value) for name, value in settings.items()}
         patches = {}
         replicas = None
         comp_desc = desc["application"]["components"].get(comp_name) or {}
 
-        # find deployment name and container name, and verify it's existence
+        # find deployment name and container name, and verify its existence
         cont_name = None
         dep_name = comp_desc.get("deployment", comp_name)
         if "/" in dep_name:
