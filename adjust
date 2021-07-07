@@ -3,10 +3,11 @@ from __future__ import print_function
 
 import copy
 import importlib
-import sys
+import math
 import os
 import errno
 import subprocess
+import sys
 import time
 import datetime
 import hashlib
@@ -185,6 +186,11 @@ def read_desc():
 
     comps = desc["application"]["components"]
     replicas_tracker = {}
+    valid_setting_keys = {'min', 'max', 'step', 'pinned', 'index'}
+    valid_env_keys = {
+        'range': {'type', 'default', 'pinned', 'index', 'min', 'max', 'step'},
+        'enum': {'type', 'default', 'pinned', 'index', 'values'}
+    }
     for name, comp in comps.items():
         settings = comp.get("settings", {})
         # sub-setting validation
@@ -196,6 +202,38 @@ def read_desc():
             dep_name = dep_name.split("/")[0]  # if no '/', this just gets the whole name
             replicas_tracker.setdefault(dep_name, 0)
             replicas_tracker[dep_name] += 1
+
+        for k,v in settings.items():
+            bad_keys = v.keys() - valid_setting_keys
+            assert len(bad_keys) < 1, "comp {}: setting {} config was malformed, contained unknown key(s) {}".format(name, k, ', '.join(bad_keys))
+
+        for k,v in comp.get('env', {}).items():
+            assert v.get('type'), "comp {}: env {} config missing type config".format(name, k)
+            assert v['type'] in ['range', 'enum'], "comp {}: env {} config conained unsupported type: {}".format(name, k, v['type'])
+            bad_keys = v.keys() - valid_env_keys[v['type']]
+            assert len(bad_keys) < 1, "comp {}: env {} config was malformed, contained unknown key(s) {}".format(name, k, ', '.join(bad_keys))
+
+            if v['type'] == 'enum':
+                assert isinstance(v.get('values'), list) and all(isinstance(lv, str) for lv in v['values']), \
+                    "comp {}: env {} enum config was malformed, must include values as list of str. Found: {}"\
+                    "".format(name, k, v.get('values'))
+            if v['type'] == 'range':
+                assert isinstance(v.get('min'), (int, float)), 'comp {}: range env {} config was malformed; min must be a number. Found {}.'.format(name, k, v.get('min'))
+                assert isinstance(v.get('max'), (int, float)), 'comp {}: range env {} config was malformed; max must be a number. Found {}.'.format(name, k, v.get('max'))
+                assert isinstance(v.get('step'), (int, float)), 'comp {}: range env {} config was malformed; step must be a number. Found {}.'.format(name, k, v.get('step'))
+                
+                assert v['min'] <= v['max'], \
+                    'comp {}: range env {} config was malformed; supplied/default min ({}) is higher than supplied/default max ({})'\
+                        ''.format(name, k, v['min'], v['max'])
+
+                if v['min'] != v['max']:
+                    assert v['step'] != 0, 'comp {}: range env {} config was malformed; step cannot be zero when min != max.'.format(name, k)
+                    assert v['step'] > 0, 'comp {}: range env {} config was malformed; step must be a positive number.'.format(name, k)
+
+                    c = (v['max'] - v['min']) / float(v['step'])
+                    assert math.isclose(c, round(c, 0), abs_tol = 1/1024), \
+                        'comp {}: range setting {} config was malformed; step value must allow to get from {} to {} in equal steps of {}.'\
+                        ''.format(name, k, v['min'], v['max'], v['step'])
 
     if len(replicas_tracker) < sum(replicas_tracker.values()):
         rotten_deps = map(lambda d: d[0], filter(lambda c: c[1] > 1, replicas_tracker.items()))
